@@ -1,0 +1,394 @@
+---
+title: "장비와 소프트웨어 준비"
+description: "Raspberry Pi Pico WH, Grove Shield, Thonny IDE 설치까지 — 수업 전에 이것만 준비하면 됩니다"
+---
+
+import { Tabs, TabItem, Steps, LinkCard, Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+이 페이지에서는 센서 코딩 수업에 필요한 **하드웨어**와 **소프트웨어**를 모두 준비합니다.
+처음부터 끝까지 따라오면, 마지막에 LED가 깜빡이는 것을 확인할 수 있습니다.
+
+---
+
+## 1. 우리가 사용할 장비
+
+### Raspberry Pi Pico WH
+
+이 교재의 핵심 보드입니다. 이름에 붙은 알파벳에 의미가 있습니다.
+
+| 구분 | 의미 |
+|------|------|
+| **W** | **WiFi** 기능 내장 — 무선으로 데이터를 전송할 수 있습니다 |
+| **H** | **Header** 핀이 미리 납땜되어 있음 — 바로 꽂아서 사용할 수 있습니다 |
+
+<Aside type="tip">
+"Pico W"와 "Pico WH"는 다릅니다. **WH** 모델을 준비하세요. H가 없는 모델은 핀 헤더를 직접 납땜해야 합니다.
+</Aside>
+
+**주요 사양:**
+- **프로세서**: RP2040 — ARM Cortex-M0+ 듀얼코어, 최대 133MHz
+- **메모리**: 264KB SRAM + 2MB 플래시 스토리지
+- **무선**: 2.4GHz WiFi (802.11n) + Bluetooth 5.2
+- **프로그래밍**: MicroPython, C/C++ 등 지원 (이 교재에서는 MicroPython 사용)
+- **전원**: USB-C 또는 외부 전원(1.8V~5.5V)
+- **크기**: 약 51mm x 21mm — 엄지손가락 두 개 정도
+
+일반 컴퓨터에 비하면 사양이 낮아 보이지만, 센서 데이터를 읽고 처리하기에는 충분합니다.
+운영체제 없이 코드가 바로 실행되기 때문에 반응 속도도 빠릅니다.
+
+---
+
+### Grove Shield for Pi Pico v1.0
+
+Pico WH 위에 올려 꽂는 **확장 보드**입니다.
+이 Shield 덕분에 복잡한 배선 없이 Grove 센서를 바로 연결할 수 있습니다.
+
+**제공하는 포트:**
+
+| 포트 종류 | 개수 | 용도 | 예시 센서 |
+|-----------|------|------|----------|
+| **아날로그 (A)** | 3개 | 연속적인 값을 읽는 센서 | 조도 센서, 회전 각도 센서, 수분 센서 |
+| **디지털 (D)** | 3개 | 켜짐/꺼짐, 또는 디지털 신호 | 버튼, PIR 모션 센서, LED |
+| **I2C** | 2개 | 복잡한 데이터를 주고받는 센서 | CO₂ 센서(SCD41), OLED 디스플레이, BME280 |
+| **UART** | 2개 | 직렬 통신이 필요한 장치 | GPS 모듈, 먼지 센서 |
+
+<Aside>
+일반적인 마이크로컨트롤러 프로젝트에서는 GPIO 핀 번호를 확인하고, 브레드보드에 점퍼 와이어를 꽂아 센서를 연결합니다. Grove Shield를 사용하면 이 과정이 **4핀 커넥터를 꽂는 동작 하나**로 줄어듭니다.
+</Aside>
+
+Shield를 Pico에 장착하는 방법은 다음과 같습니다.
+
+<Steps>
+1. Pico WH의 USB 포트 방향을 확인합니다.
+2. Shield 위에 인쇄된 USB 아이콘 방향과 맞춥니다.
+3. Pico의 핀 헤더를 Shield의 소켓에 정렬한 뒤, 끝까지 눌러 꽂습니다.
+4. 양쪽 핀이 모두 들어갔는지 확인합니다. 한쪽만 들어가면 동작하지 않습니다.
+</Steps>
+
+<Aside type="caution">
+Pico를 Shield에 **거꾸로 꽂지 않도록** 주의하세요. USB 포트 방향을 기준으로 맞추면 됩니다. 거꾸로 꽂아도 고장나지는 않지만, 센서가 올바르게 동작하지 않습니다.
+</Aside>
+
+---
+
+### Grove 센서
+
+이 교재에서는 **32종의 Grove 센서**를 사용합니다.
+온도, 습도, 조도, 소리, 거리, 가스, 모션 등 다양한 물리량을 측정하는 센서가 포함되어 있습니다.
+
+모든 Grove 센서는 같은 형태의 **4핀 커넥터**를 사용합니다.
+센서 종류가 달라도 연결 방법은 동일합니다 — 케이블을 꽂기만 하면 됩니다.
+
+<Aside type="tip">
+32종 센서의 전체 목록, 상세 스펙, 연결 포트, 예제 코드는 **센서 도감**에서 확인할 수 있습니다.
+</Aside>
+
+<LinkCard
+  title="센서 도감 보기"
+  description="32종 Grove 센서의 스펙, 연결 방법, MicroPython 코드를 한눈에"
+  href="/code-human-textbook/appendix/sensor-catalog/"
+/>
+
+---
+
+### Grove 케이블 (4핀)
+
+센서와 Shield를 연결하는 케이블입니다.
+
+- 양쪽 커넥터가 **같은 모양**입니다
+- 커넥터에 홈이 파여 있어서 **한 방향으로만** 꽂힙니다
+- 잘못된 방향으로 꽂히지 않으므로 합선(쇼트) 걱정이 없습니다
+
+케이블 길이는 보통 20cm입니다. 센서를 멀리 배치해야 할 때는 50cm 케이블을 사용할 수도 있습니다.
+
+---
+
+### USB-C 케이블
+
+컴퓨터와 Pico WH를 연결하는 케이블입니다. 두 가지 역할을 합니다.
+
+1. **전원 공급** — Pico에 전기를 보내 동작시킵니다
+2. **데이터 전송** — 코드를 Pico에 업로드하고, 센서 값을 컴퓨터에서 확인합니다
+
+<Aside type="caution" title="충전 전용 케이블은 안 됩니다">
+스마트폰 충전에 쓰는 케이블 중에는 **충전만 되고 데이터 전송이 안 되는** 것이 있습니다. 이런 케이블을 사용하면 컴퓨터가 Pico를 인식하지 못합니다. 포장에 "데이터 전송 지원" 또는 "Data & Charge"라고 적힌 케이블을 사용하세요.
+</Aside>
+
+---
+
+## 2. 소프트웨어 설치
+
+### 2-1. Thonny IDE 설치
+
+**Thonny**는 MicroPython 개발에 최적화된 코드 편집기(IDE)입니다.
+코드를 작성하고, Pico에 업로드하고, 실행 결과를 확인하는 작업을 모두 이 프로그램 안에서 합니다.
+
+<Tabs>
+  <TabItem label="Windows">
+    <Steps>
+      1. [thonny.org](https://thonny.org) 에 접속합니다.
+      2. 페이지 상단의 **Windows** 링크를 클릭해 설치 파일을 다운로드합니다.
+      3. 다운로드된 `.exe` 파일을 실행합니다.
+      4. "Install for me only" (나만 사용)를 선택하면 관리자 권한 없이도 설치할 수 있습니다.
+      5. 설치가 끝나면 **Thonny**를 실행합니다.
+    </Steps>
+  </TabItem>
+  <TabItem label="macOS">
+    <Steps>
+      1. [thonny.org](https://thonny.org) 에 접속합니다.
+      2. 페이지 상단의 **Mac** 링크를 클릭해 `.pkg` 파일을 다운로드합니다.
+      3. 다운로드된 파일을 더블 클릭해 설치합니다.
+      4. "확인되지 않은 개발자" 경고가 나타나면: **시스템 설정 → 개인 정보 보호 및 보안**에서 "확인 없이 열기"를 선택합니다.
+      5. 설치가 끝나면 **Thonny**를 실행합니다.
+    </Steps>
+  </TabItem>
+  <TabItem label="Linux">
+    <Steps>
+      1. 터미널을 엽니다.
+      2. 다음 명령어를 입력합니다:
+         ```bash
+         sudo apt install thonny
+         ```
+         또는 [thonny.org](https://thonny.org)에서 설치 스크립트를 다운로드합니다:
+         ```bash
+         bash <(curl -s https://thonny.org/installer-for-linux)
+         ```
+      3. 설치가 끝나면 `thonny` 명령어로 실행합니다.
+    </Steps>
+  </TabItem>
+</Tabs>
+
+**Thonny를 처음 실행하면** 언어 선택 화면이 나타납니다.
+한국어를 선택해도 되고, 영어 그대로 사용해도 됩니다. 이 교재에서는 영어 기준으로 설명합니다.
+
+Thonny 화면은 크게 세 영역으로 나뉩니다.
+
+| 영역 | 위치 | 역할 |
+|------|------|------|
+| **코드 편집기** | 위쪽 | 코드를 작성하는 곳 |
+| **Shell (쉘)** | 아래쪽 | 코드 실행 결과가 표시되는 곳, 한 줄씩 명령을 입력할 수도 있음 |
+| **파일 탐색기** | 왼쪽 (View → Files) | 컴퓨터와 Pico의 파일을 볼 수 있는 곳 |
+
+---
+
+### 2-2. MicroPython 펌웨어 설치
+
+Pico WH는 공장 출하 상태에서 MicroPython이 설치되어 있지 않습니다.
+처음 사용할 때 한 번만 펌웨어를 설치하면 됩니다.
+
+<Steps>
+1. **Pico를 BOOTSEL 모드로 연결합니다.**
+
+   Pico 보드에 있는 작은 **BOOTSEL**(Boot Selection) **버튼**을 **누른 채로** USB 케이블을 컴퓨터에 연결합니다.
+   연결된 뒤 버튼에서 손을 뗍니다.
+
+2. **USB 드라이브를 확인합니다.**
+
+   성공하면 컴퓨터에 **RPI-RP2**라는 이름의 USB 드라이브가 나타납니다.
+   마치 USB 메모리를 꽂은 것처럼 보입니다.
+
+   <Aside type="tip">
+   RPI-RP2 드라이브가 나타나지 않으면, BOOTSEL 버튼을 누르는 타이밍을 다시 확인하세요. 버튼을 먼저 누르고, 그 상태에서 USB를 연결해야 합니다.
+   </Aside>
+
+3. **Thonny에서 펌웨어를 설치합니다.**
+
+   Thonny를 실행하고, 메뉴에서 다음 경로로 이동합니다:
+
+   **Run → Configure interpreter...**
+
+   또는 Thonny 창 오른쪽 아래에 있는 인터프리터 선택 영역을 클릭합니다.
+
+4. **인터프리터를 선택합니다.**
+
+   - Interpreter 탭에서 **MicroPython (Raspberry Pi Pico)** 를 선택합니다.
+   - 아래쪽의 **"Install or update MicroPython"** 링크를 클릭합니다.
+
+5. **펌웨어를 설치합니다.**
+
+   - Target volume: **RPI-RP2**가 자동으로 선택됩니다.
+   - MicroPython variant: **Raspberry Pi Pico W / Pico WH** 를 선택합니다.
+   - **Install** 버튼을 클릭합니다.
+   - 설치가 완료될 때까지 약 10~30초 기다립니다.
+
+6. **설치 완료를 확인합니다.**
+
+   설치가 끝나면 Thonny Shell 영역에 다음과 같은 프롬프트가 나타납니다:
+
+   ```
+   MicroPython v1.x.x on ...; Raspberry Pi Pico W with RP2040
+   Type "help()" for more information.
+   >>>
+   ```
+
+   `>>>` 프롬프트가 보이면 MicroPython이 정상적으로 설치된 것입니다.
+</Steps>
+
+<Aside>
+펌웨어 설치는 **처음 한 번만** 하면 됩니다. 이후에는 USB를 연결하기만 하면 Thonny가 자동으로 Pico를 인식합니다. MicroPython 버전을 업데이트하고 싶을 때만 같은 과정을 반복하면 됩니다.
+</Aside>
+
+---
+
+### 2-3. Grove 라이브러리 설치 (필요한 경우)
+
+대부분의 Grove 센서는 MicroPython의 기본 `machine` 모듈만으로 사용할 수 있습니다.
+별도의 라이브러리를 설치하지 않아도 됩니다.
+
+하지만 일부 센서는 전용 라이브러리가 필요합니다. 예를 들면:
+
+| 센서 | 필요한 라이브러리 | 이유 |
+|------|------------------|------|
+| SCD41 (CO₂) | `scd4x` | I2C 통신 프로토콜이 복잡함 |
+| BME280 (온습도+기압) | `bme280` | 보정 계산이 필요함 |
+| SSD1306 OLED | `ssd1306` | 디스플레이 제어 명령이 많음 |
+
+라이브러리 설치가 필요한 센서를 사용할 때는 각 차시 교재에서 설치 방법을 안내합니다.
+여기서는 **설치하는 방법**만 미리 익혀 두세요.
+
+<Steps>
+1. Thonny에서 **Tools → Manage packages...** 를 클릭합니다.
+2. 검색창에 라이브러리 이름(예: `scd4x`)을 입력합니다.
+3. 검색 결과에서 원하는 패키지를 선택하고 **Install** 을 클릭합니다.
+4. 설치가 끝나면 코드에서 `import`하여 사용할 수 있습니다.
+</Steps>
+
+<Aside type="tip">
+라이브러리가 Thonny 패키지 관리자에서 검색되지 않는 경우도 있습니다. 그때는 `.py` 파일을 직접 Pico에 업로드하는 방법을 사용합니다. 해당 차시 교재에서 자세히 안내합니다.
+</Aside>
+
+---
+
+## 3. 첫 연결 테스트
+
+장비와 소프트웨어가 모두 준비되었으면, 실제로 동작하는지 확인해 봅시다.
+Pico WH에 내장된 LED를 깜빡이는 코드를 실행합니다.
+
+<Steps>
+1. **Grove Shield에 Pico를 장착합니다.**
+
+   USB 포트 방향을 맞춰서 끝까지 눌러 꽂습니다.
+
+2. **USB 케이블로 컴퓨터에 연결합니다.**
+
+   이번에는 BOOTSEL 버튼을 누르지 **않고** 그냥 연결합니다.
+   (BOOTSEL 모드는 펌웨어 설치할 때만 사용합니다.)
+
+3. **Thonny를 실행하고 연결을 확인합니다.**
+
+   Shell에 `>>>` 프롬프트가 나타나면 연결 성공입니다.
+   나타나지 않으면, 오른쪽 아래 인터프리터가 **MicroPython (Raspberry Pi Pico)**로 되어 있는지 확인하세요.
+
+4. **코드를 입력합니다.**
+
+   Thonny 상단의 코드 편집기에 다음 코드를 입력합니다:
+
+   ```python
+   from machine import Pin
+   import time
+
+   led = Pin("LED", Pin.OUT)  # Pico W/WH 내장 LED
+
+   while True:
+       led.toggle()
+       time.sleep(0.5)
+   ```
+
+   코드를 줄별로 살펴보면:
+
+   | 줄 | 설명 |
+   |----|------|
+   | `from machine import Pin` | 핀(GPIO)을 제어하기 위한 모듈을 가져옵니다 |
+   | `import time` | 시간 관련 함수(`sleep` 등)를 가져옵니다 |
+   | `led = Pin("LED", Pin.OUT)` | 내장 LED 핀을 출력 모드로 설정합니다 |
+   | `while True:` | 아래 내용을 무한 반복합니다 |
+   | `led.toggle()` | LED 상태를 뒤집습니다 (켜짐 ↔ 꺼짐) |
+   | `time.sleep(0.5)` | 0.5초 동안 멈춥니다 |
+
+5. **실행합니다.**
+
+   Thonny 상단의 **초록색 재생 버튼(Run)**을 클릭하거나, 키보드에서 **F5**를 누릅니다.
+
+6. **결과를 확인합니다.**
+
+   Pico 보드의 초록색 LED가 0.5초 간격으로 깜빡이면 **준비 완료**입니다.
+
+   프로그램을 멈추려면 Thonny에서 **빨간색 정지 버튼(Stop)**을 클릭하거나, 키보드에서 **Ctrl + C**를 누릅니다.
+</Steps>
+
+<Aside type="tip" title="Pin 번호에 대해">
+Pico W/WH 모델에서는 내장 LED가 일반 GPIO 핀이 아니라 무선 칩을 통해 연결되어 있습니다. 그래서 `Pin(25)` 대신 `Pin("LED")`를 사용합니다. 이전 모델(Pico, 비-W 버전)에서는 `Pin(25)`가 맞지만, WH 모델에서는 `Pin("LED")`를 사용하세요.
+</Aside>
+
+---
+
+## 4. 문제가 생기면?
+
+처음 설정하다 보면 예상치 못한 문제를 만날 수 있습니다.
+자주 발생하는 문제와 해결 방법을 정리했습니다.
+
+### "Pico가 컴퓨터에 인식되지 않아요"
+
+<Steps>
+1. **USB 케이블을 확인하세요.** 충전 전용 케이블은 데이터를 전송하지 못합니다. 다른 케이블로 바꿔 보세요.
+2. **다른 USB 포트에 연결해 보세요.** USB 허브를 사용 중이라면, 컴퓨터 본체의 포트에 직접 연결합니다.
+3. **BOOTSEL 모드로 다시 시도하세요.** BOOTSEL 버튼을 누른 채 USB를 연결했을 때 RPI-RP2 드라이브가 나타나는지 확인합니다.
+</Steps>
+
+### "Thonny에서 연결이 안 돼요"
+
+<Steps>
+1. Thonny 오른쪽 아래의 인터프리터가 **MicroPython (Raspberry Pi Pico)**로 설정되어 있는지 확인하세요.
+2. 포트 선택에서 Pico가 연결된 포트를 직접 선택해 보세요 (예: `COM3`, `/dev/ttyACM0`).
+3. Thonny를 완전히 종료한 뒤 다시 실행해 보세요. 간혹 포트 점유 문제가 생깁니다.
+4. 다른 프로그램(VS Code, Arduino IDE 등)이 같은 포트를 사용 중이면 해당 프로그램을 먼저 닫으세요.
+</Steps>
+
+### "코드를 실행했는데 에러가 나요"
+
+흔한 에러 메시지와 원인:
+
+| 에러 메시지 | 원인 | 해결 |
+|------------|------|------|
+| `ImportError: no module named 'xxx'` | 라이브러리가 설치되지 않음 | Tools → Manage packages에서 설치 |
+| `OSError: [Errno 5] EIO` | 센서 연결 불량 또는 잘못된 포트 | 케이블 재연결, 포트 종류(I2C/아날로그 등) 확인 |
+| `ValueError: invalid pin` | 핀 번호가 틀림 | Grove Shield의 포트 라벨 확인 |
+| `KeyboardInterrupt` | Ctrl+C로 중단된 것 (에러가 아님) | 정상 동작. 다시 실행하면 됩니다 |
+
+<Aside>
+여기서 해결되지 않는 문제는 트러블슈팅 페이지에서 더 자세히 다루고 있습니다.
+</Aside>
+
+<LinkCard
+  title="트러블슈팅 가이드"
+  description="설치, 연결, 실행 과정에서 발생할 수 있는 문제와 해결 방법 모음"
+  href="/code-human-textbook/appendix/troubleshooting/"
+/>
+
+---
+
+## 준비 완료 체크리스트
+
+다음 항목을 모두 확인했다면, 수업을 시작할 준비가 된 것입니다.
+
+- [ ] Raspberry Pi Pico **WH** 모델을 가지고 있다
+- [ ] Grove Shield for Pi Pico에 Pico를 올바르게 장착했다
+- [ ] 데이터 전송이 되는 USB-C 케이블을 가지고 있다
+- [ ] Thonny IDE를 설치했다
+- [ ] MicroPython 펌웨어를 설치했다 (Shell에 `>>>` 프롬프트 확인)
+- [ ] LED 깜빡이기 코드를 실행해서 동작을 확인했다
+
+모두 확인했다면, 원하는 코스를 선택하여 시작하세요.
+
+<CardGrid>
+  <LinkCard
+    title="코스 A: 1차시 — 센서로 세상 읽기"
+    description="첫 번째 센서를 연결하고, 데이터를 눈으로 확인하는 것부터 시작합니다"
+    href="/code-human-textbook/course-a/act1/lesson-01/"
+  />
+  <LinkCard
+    title="코스 B: 프로젝트로 시작하기"
+    description="3시간 집중 프로젝트로 바로 만들면서 배우고 싶다면"
+    href="/code-human-textbook/course-b/intro/"
+  />
+</CardGrid>

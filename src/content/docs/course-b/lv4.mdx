@@ -30,104 +30,490 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ---
 
+## Lv.4가 특별한 이유
+
+| | Lv.3 연구자 | Lv.4 마스터 |
+|---|---|---|
+| **센서** | 1~2개 | 3개 이상 |
+| **대시보드** | OLED 또는 PC | OLED **+** PC (이중) |
+| **AI** | 데이터 분석 | **ML 모델 학습 + 적용** |
+| **운영** | 실험 시간 동안만 | **장기 운영** 설계 |
+| **산출물** | 연구 보고서 | **시스템 설명서 + 발표** |
+
+---
+
+## 준비물
+
+| 준비물 | 설명 |
+|--------|------|
+| Raspberry Pi Pico 2 WH + Grove Shield | 기본 하드웨어 |
+| OLED 디스플레이 (SSD1306) | OLED 대시보드용 |
+| 센서 3개 이상 (프로젝트별) | 아래 예시 참고 |
+| PC (Python 설치) | PC 대시보드 + ML 학습 |
+| AI 챗봇 | 코드 생성 + 시스템 설계 상담 |
+
+---
+
 ## 예시 프로젝트 3가지
 
 <Tabs>
-  <TabItem label="학교 공기질 모니터링">
+  <TabItem label="🌍 학교 공기질 모니터링">
 
 ### 프로젝트 1: 학교 공기질 종합 모니터링 시스템
 
 **문제:** 교실마다 공기질이 다른데, 언제 어디서 환기해야 할지 데이터가 없다.
 
 **센서 구성:**
-- DHT20 온습도 센서 (I2C)
-- SGP30 공기질 센서 (I2C) -- CO2, TVOC
-- 빛 센서 (ADC) -- 수업 중/쉬는 시간 구분용
+- SCD41 CO2 센서 (I2C, 0x62) — CO2 농도
+- DHT20 온습도 센서 (I2C, 0x38) — 온도, 습도
+- 먼지 센서 (ADC, GP28) — 간이 미세먼지 측정
+- OLED (I2C, 0x3C) — 대시보드 표시
 
 **ML 활용:**
 - 센서 데이터를 10분 단위로 수집하여 CSV로 저장
-- "환기 필요" / "적정" / "쾌적" 3개 클래스로 라벨링
+- "Good / Fair / Poor / Bad" 4개 등급으로 공기질 인덱스(AQI) 점수 산출
 - Teachable Machine 또는 규칙 기반 분류 모델 적용
-- 환기 필요 시 자동 알림 (LED + OLED 경고)
 
 **이중 대시보드:**
-- OLED: CO2 값 + 온도 + 상태 아이콘 + ML 예측 결과
-- PC: matplotlib 실시간 그래프 + 시간대별 환기 추천
+- OLED: CO2 + 먼지 + 온도 + AQI 점수 + 막대그래프
+- PC: Serial 출력을 matplotlib으로 실시간 그래프
 
-**장기 운영 설계:**
+:::note[핀 배치]
+- DHT20, SCD41, OLED: I2C1 (SDA=GP6, SCL=GP7) — 주소가 모두 다르므로 공존 가능
+- 먼지 센서: GP28 (A0=GP26과 A2=GP27은 다른 센서용으로 예약)
+:::
+
+#### 전체 코드
+
 ```python
-# 파일 크기 관리
-MAX_FILE_SIZE = 500_000  # 500KB
-# 날짜별 파일 분리
-filename = f"data_{day_count}.csv"
-# 에러 카운터
-if error_count > 100:
-    # 센서 재초기화
-    reset_sensors()
+from machine import I2C, Pin, ADC
+import time
+
+# ── 센서 설정 ──
+i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
+dht_addr = 0x38
+scd_addr = 0x62
+dust = ADC(Pin(28))  # 미세먼지 센서 (ADC — GP28, A0/A2는 다른 센서용)
+time.sleep(0.1)
+
+from ssd1306 import SSD1306_I2C
+oled = SSD1306_I2C(128, 64, i2c)
+
+def read_dht20():
+    i2c.writeto(dht_addr, bytes([0xAC, 0x33, 0x00]))
+    time.sleep(0.08)
+    data = i2c.readfrom(dht_addr, 7)
+    humi = ((data[1] << 12) | (data[2] << 4) | (data[3] >> 4)) / 1048576 * 100
+    temp = (((data[3] & 0x0F) << 16) | (data[4] << 8) | data[5]) / 1048576 * 200 - 50
+    return round(temp, 1), round(humi, 1)
+
+def read_scd41():
+    i2c.writeto(scd_addr, bytes([0xEC, 0x05]))
+    time.sleep(0.01)
+    data = i2c.readfrom(scd_addr, 9)
+    return (data[0] << 8) | data[1]
+
+# SCD41 주기 측정 시작 (한 번만 호출)
+i2c.writeto(scd_addr, bytes([0x21, 0xB1]))
+print("SCD41 준비 중... 5초 대기")
+time.sleep(5)
+
+def read_dust():
+    raw = dust.read_u16()
+    # 간이 미세먼지 농도 변환 (ug/m3 근사)
+    return round(raw / 65535 * 500, 0)
+
+def air_quality_index(co2, dust_ug, temp, humi):
+    score = 100
+    if co2 > 1000: score -= 30
+    elif co2 > 800: score -= 15
+    if dust_ug > 75: score -= 30
+    elif dust_ug > 35: score -= 15
+    if temp < 18 or temp > 28: score -= 10
+    if humi < 30 or humi > 70: score -= 10
+    return max(0, score)
+
+def aqi_grade(score):
+    if score >= 80: return "Good"
+    elif score >= 60: return "Fair"
+    elif score >= 40: return "Poor"
+    else: return "Bad!"
+
+# ── CSV 파일 준비 ──
+f = open("air_quality.csv", "a")
+f.write("분,CO2,온도,습도,미세먼지,AQI점수,등급\n")
+count = 0
+start = time.ticks_ms()
+
+# ── 메인 루프 ──
+while True:
+    temp, humi = read_dht20()
+    co2 = read_scd41()
+    dust_ug = read_dust()
+    aqi = air_quality_index(co2, dust_ug, temp, humi)
+    grade = aqi_grade(aqi)
+    count += 1
+    elapsed_min = time.ticks_diff(time.ticks_ms(), start) // 60000
+
+    # OLED 이중 대시보드
+    oled.fill(0)
+    oled.text("AirQ Monitor", 16, 0)
+    oled.text(f"CO2:{co2} Dust:{dust_ug:.0f}", 0, 12)
+    oled.text(f"T:{temp}C H:{humi}%", 4, 24)
+    oled.text(f"AQI: {aqi}/100", 4, 38)
+    oled.text(f"[{grade}]", 4, 50)
+    # AQI 막대
+    oled.fill_rect(4, 60, aqi, 3, 1)
+    oled.show()
+
+    # CSV + Serial (PC 이중 대시보드)
+    f.write(f"{elapsed_min},{co2},{temp},{humi},{dust_ug:.0f},{aqi},{grade}\n")
+    f.flush()
+    # Serial 출력 (PC 실시간 그래프용)
+    print(f"CO2:{co2},T:{temp},H:{humi},D:{dust_ug:.0f},AQI:{aqi}")
+    time.sleep(10)
 ```
 
+#### PC 실시간 대시보드 (Serial 수신)
+
+```python
+# PC에서 실행 — Pico의 Serial 출력을 실시간 그래프로 표시
+import serial
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+ser = serial.Serial('/dev/tty.usbmodem1101', 115200)  # 포트 확인 필요
+data = {'co2': [], 'aqi': [], 'time': []}
+t = 0
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6))
+
+def update(frame):
+    global t
+    line = ser.readline().decode().strip()
+    if line.startswith('CO2:'):
+        parts = dict(item.split(':') for item in line.split(','))
+        data['co2'].append(int(parts['CO2']))
+        data['aqi'].append(int(parts['AQI']))
+        data['time'].append(t)
+        t += 10
+
+        ax1.clear()
+        ax1.plot(data['time'], data['co2'], 'b-')
+        ax1.axhline(y=1000, color='r', linestyle='--')
+        ax1.set_ylabel('CO2 (ppm)')
+        ax1.set_title('Air Quality Real-time Dashboard')
+
+        ax2.clear()
+        ax2.plot(data['time'], data['aqi'], 'g-')
+        ax2.set_ylabel('AQI Score')
+        ax2.set_xlabel('Time (s)')
+
+ani = FuncAnimation(fig, update, interval=10000)
+plt.tight_layout()
+plt.show()
+```
+
+**확장 아이디어:**
+- 교실별로 데이터를 비교하여 환기 우선순위 결정
+- 시간대별 공기질 패턴 분석 (수업 시간 vs 쉬는 시간)
+
+{/* end */}
+
   </TabItem>
-  <TabItem label="에너지 절약 자동화">
+  <TabItem label="⚡ 교실 에너지 절약">
 
 ### 프로젝트 2: 교실 에너지 절약 자동화 시스템
 
 **문제:** 교실 조명과 환기가 필요 없을 때도 켜져 있어 에너지가 낭비된다.
 
 **센서 구성:**
-- 빛 센서 (ADC) -- 자연광 측정
-- 초음파 거리 센서 (Digital) -- 사람 존재 감지
-- DHT20 온습도 센서 (I2C) -- 냉난방 효율 측정
+- 빛 센서 (ADC, GP26) — 자연광 측정
+- PIR 인체감지 센서 (Digital, GP16) — 사람 존재 감지
+- DHT20 온습도 센서 (I2C, 0x38) — 냉난방 효율 측정
+- 릴레이 (Digital, GP18) — 조명/환풍기 자동 제어
+- OLED (I2C, 0x3C) — 대시보드 표시
 
 **ML 활용:**
 - "교실 사용 중" / "비어 있음" / "쉬는 시간" 3개 클래스
-- 거리 센서 + 소리 + 빛 패턴으로 분류
-- 비어 있으면 -> "조명/냉방 OFF 권장" 알림
+- PIR 감지 + 빛 패턴 + 시간 정보로 분류
+- 비어 있으면 → "조명 OFF 권장" 알림
 
-**이중 대시보드:**
-- OLED: 현재 상태 + 절약 가능 에너지 추정
-- PC: 시간대별 에너지 절약 기회 분석 그래프
+:::caution[핀 충돌 해결]
+PIR 센서가 GP16을 사용합니다. 릴레이의 기본 핀도 GP16이므로, 이 프로젝트에서는 릴레이를 **GP18**에 연결합니다.
+:::
 
-**절약 효과 추정 코드:**
+#### 전체 코드
+
 ```python
-# 조명이 불필요하게 켜져 있던 시간 추정
-if room_empty and light_on:
-    waste_minutes += interval / 60
-    waste_kwh = waste_minutes / 60 * 0.04  # 40W 조명 기준
-    print(f"절약 가능: {waste_kwh:.3f}kWh")
+from machine import I2C, Pin, ADC
+import time
+
+# ── 센서 설정 ──
+i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
+dht_addr = 0x38
+light = ADC(Pin(26))  # Grove A0 포트
+pir = Pin(16, Pin.IN)   # PIR 인체감지 (Grove D16)
+relay = Pin(18, Pin.OUT) # 릴레이 (GP18 — PIR이 GP16 사용하므로 대체 핀)
+time.sleep(0.1)
+
+from ssd1306 import SSD1306_I2C
+oled = SSD1306_I2C(128, 64, i2c)
+
+def read_dht20():
+    i2c.writeto(dht_addr, bytes([0xAC, 0x33, 0x00]))
+    time.sleep(0.08)
+    data = i2c.readfrom(dht_addr, 7)
+    humi = ((data[1] << 12) | (data[2] << 4) | (data[3] >> 4)) / 1048576 * 100
+    temp = (((data[3] & 0x0F) << 16) | (data[4] << 8) | data[5]) / 1048576 * 200 - 50
+    return round(temp, 1), round(humi, 1)
+
+# 자동 제어 로직
+EMPTY_TIMEOUT = 300  # 5분 동안 사람 없으면 절전
+last_motion = time.ticks_ms()
+relay_on = False
+
+# ── CSV 파일 준비 ──
+f = open("energy_log.csv", "a")
+f.write("분,온도,습도,조도,재실,릴레이,절약시간(초)\n")
+save_seconds = 0
+start = time.ticks_ms()
+
+# ── 메인 루프 ──
+while True:
+    temp, humi = read_dht20()
+    light_pct = round(light.read_u16() / 65535 * 100, 1)
+    occupied = pir.value() == 1
+    now = time.ticks_ms()
+
+    if occupied:
+        last_motion = now
+
+    idle_sec = time.ticks_diff(now, last_motion) // 1000
+
+    # 자동 제어
+    if not occupied and idle_sec > EMPTY_TIMEOUT:
+        relay.value(0)
+        relay_on = False
+        save_seconds += 2
+    elif light_pct < 30 and occupied:
+        relay.value(1)
+        relay_on = True
+    elif light_pct > 70:
+        relay.value(0)
+        relay_on = False
+        save_seconds += 2
+
+    elapsed_min = time.ticks_diff(now, start) // 60000
+
+    # OLED 대시보드
+    oled.fill(0)
+    oled.text("Energy Saver", 16, 0)
+    oled.text(f"T:{temp}C L:{light_pct:.0f}%", 4, 14)
+    oled.text(f"Person: {'O' if occupied else 'X'}", 4, 26)
+    oled.text(f"Relay: {'ON' if relay_on else 'OFF'}", 4, 38)
+    oled.text(f"Saved: {save_seconds//60}min", 4, 50)
+    oled.show()
+
+    # CSV 저장
+    f.write(f"{elapsed_min},{temp},{humi},{light_pct},{'Y' if occupied else 'N'},{'ON' if relay_on else 'OFF'},{save_seconds}\n")
+    f.flush()
+
+    print(f"T:{temp} L:{light_pct:.0f}% P:{'Y' if occupied else 'N'} R:{'ON' if relay_on else 'OFF'}")
+    time.sleep(2)
 ```
 
+#### 자동 제어 로직 해설
+
+```
+1. 사람이 없고, 5분 이상 지남 → 릴레이 OFF (절전)
+2. 사람이 있고, 어두움(30% 미만) → 릴레이 ON (조명 켜기)
+3. 밝음(70% 이상) → 릴레이 OFF (자연광으로 충분)
+```
+
+이 로직은 간단하지만, 실제 스마트 빌딩의 자동화 시스템과 동일한 원리입니다.
+
+**확장 아이디어:**
+- 시간대별 에너지 절약량을 그래프로 시각화
+- 에너지 절약 목표 설정 (예: "하루 30분 이상 절약")
+- 냉난방 자동 제어 (온도에 따라 릴레이 ON/OFF)
+
+{/* end */}
+
   </TabItem>
-  <TabItem label="동작 분류 ML">
+  <TabItem label="🤖 동작 분류 ML">
 
 ### 프로젝트 3: 센서 기반 동작 분류 ML 시스템
 
 **문제:** 착용형 센서로 사람의 동작(앉기/걷기/달리기)을 자동 분류할 수 있을까?
 
 **센서 구성:**
-- ADXL345 가속도 센서 (I2C) -- 3축 가속도
-- DHT20 온습도 센서 (I2C) -- 체온 변화 (간접)
-- 소리 센서 (ADC) -- 발소리 감지
+- MPU6050 가속도 센서 (I2C, 0x68) — 3축 가속도
+- OLED (I2C, 0x3C) — 대시보드 표시
 
 **ML 활용:**
-- 동작별 가속도 데이터를 20Hz로 수집 (10초 x 동작별 5회)
-- "앉기" / "걷기" / "달리기" / "점프" 4개 클래스
+- 동작별 가속도 데이터를 20Hz로 수집 (각 동작 100개 샘플)
+- "Idle / Walk / Shake / Jump" 4개 클래스
 - Teachable Machine에 CSV 업로드 또는 규칙 기반 분류
 
-**이중 대시보드:**
-- OLED: 실시간 X/Y/Z 그래프 + 현재 감지된 동작
-- PC: 동작별 시간 분포 파이 차트
-
-**데이터 수집 -> ML 파이프라인:**
+:::note[ML 파이프라인]
 ```
 1. Pico에서 가속도 데이터 CSV 수집 (동작별)
 2. CSV를 PC로 전송
 3. Teachable Machine에 업로드하여 학습
-4. 학습된 모델로 실시간 분류
-5. 분류 결과를 대시보드에 표시
+4. 학습된 규칙을 Pico 코드에 반영
+5. 실시간 분류 결과를 대시보드에 표시
 ```
+:::
+
+#### 전체 코드
+
+이 코드는 **두 가지 모드**로 동작합니다:
+- `MODE = "collect"`: ML 학습용 데이터 수집
+- `MODE = "predict"`: 규칙 기반 실시간 동작 분류
+
+```python
+from machine import I2C, Pin
+import time
+import math
+
+# ── I2C 설정 ──
+i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
+mpu_addr = 0x68
+time.sleep(0.1)
+
+# MPU6050 초기화
+i2c.writeto_mem(mpu_addr, 0x6B, bytes([0x00]))
+time.sleep(0.1)
+
+from ssd1306 import SSD1306_I2C
+oled = SSD1306_I2C(128, 64, i2c)
+
+def read_accel():
+    data = i2c.readfrom_mem(mpu_addr, 0x3B, 6)
+    ax = (data[0] << 8 | data[1]) - (65536 if data[0] > 127 else 0)
+    ay = (data[2] << 8 | data[3]) - (65536 if data[2] > 127 else 0)
+    az = (data[4] << 8 | data[5]) - (65536 if data[4] > 127 else 0)
+    return ax / 16384, ay / 16384, az / 16384
+
+# ── 데이터 수집 모드 ──
+# Teachable Machine 학습용 데이터 수집
+MODE = "collect"  # "collect" 또는 "predict"
+LABEL = "idle"    # 수집할 동작 이름
+SAMPLES = 100     # 수집할 샘플 수
+
+def collect_data(label, n_samples):
+    print(f"[{label}] 데이터 수집 시작! 3초 후...")
+    time.sleep(3)
+    f = open(f"ml_{label}.csv", "a")
+    f.write("ax,ay,az,magnitude\n")
+
+    for i in range(n_samples):
+        ax, ay, az = read_accel()
+        mag = math.sqrt(ax*ax + ay*ay + az*az)
+        f.write(f"{ax:.3f},{ay:.3f},{az:.3f},{mag:.3f}\n")
+
+        oled.fill(0)
+        oled.text(f"Collecting: {label}", 0, 0)
+        oled.text(f"{i+1}/{n_samples}", 4, 20)
+        # 진행 막대
+        oled.fill_rect(4, 40, int(i/n_samples*120), 8, 1)
+        oled.show()
+
+        time.sleep(0.05)  # 20Hz 샘플링
+
+    f.close()
+    print(f"[{label}] {n_samples}개 수집 완료!")
+
+def predict_mode():
+    # 간단한 규칙 기반 분류 (ML 모델 적용 전 테스트용)
+    while True:
+        ax, ay, az = read_accel()
+        mag = math.sqrt(ax*ax + ay*ay + az*az)
+
+        if mag < 1.1:
+            label = "Idle"
+        elif mag < 2.0:
+            label = "Walk"
+        elif mag < 4.0:
+            label = "Shake"
+        else:
+            label = "Jump"
+
+        oled.fill(0)
+        oled.text("ML Predict", 24, 0)
+        oled.text(f"G: {mag:.2f}", 4, 20)
+        oled.text(f"=> {label}", 4, 40)
+        oled.show()
+
+        # Serial로 PC 전송 (ML 모델 연동용)
+        print(f"{ax:.3f},{ay:.3f},{az:.3f},{mag:.3f},{label}")
+        time.sleep(0.1)
+
+# ── 실행 ──
+if MODE == "collect":
+    collect_data(LABEL, SAMPLES)
+else:
+    predict_mode()
+```
+
+#### ML 데이터 수집 가이드
+
+각 동작별로 `LABEL`을 바꿔가며 데이터를 수집합니다:
+
+```python
+# 1단계: 가만히 있기 데이터 수집
+MODE = "collect"
+LABEL = "idle"
+SAMPLES = 100
+
+# 2단계: 걷기 데이터 수집
+LABEL = "walk"
+
+# 3단계: 흔들기 데이터 수집
+LABEL = "shake"
+
+# 4단계: 점프 데이터 수집
+LABEL = "jump"
+```
+
+수집이 끝나면 4개의 CSV 파일(`ml_idle.csv`, `ml_walk.csv`, `ml_shake.csv`, `ml_jump.csv`)이 생성됩니다.
+
+#### Teachable Machine 활용
+
+1. [Teachable Machine](https://teachablemachine.withgoogle.com/) 접속
+2. "Pose Project" 대신 데이터를 직접 활용
+3. 각 클래스에 CSV 데이터의 패턴을 학습
+4. 분류 규칙을 코드에 반영
+
+**확장 아이디어:**
+- 실시간 분류 결과를 PC 대시보드에 파이 차트로 표시
+- 동작별 시간 분포 분석 (하루 중 앉아있는 시간 vs 활동 시간)
+- 온도 변화와 운동 강도의 상관관계 분석
+
+{/* end */}
 
   </TabItem>
 </Tabs>
+
+---
+
+## 잠깐, 방금 무슨 일이 일어난 걸까요?
+
+여러분이 방금 한 일을 돌아보세요.
+
+**Lv.1**: 센서 1개 → 숫자 표시
+**Lv.2**: 센서 2개 → 스마트 판단
+**Lv.3**: 데이터 수집 → 가설 검증
+**Lv.4**: 다중 센서 + ML → **실제 문제 해결 시스템**
+
+Lv.4에서 여러분이 만든 것은:
+- **센서 계층**: 여러 센서에서 동시에 데이터를 수집
+- **처리 계층**: ML 모델과 규칙으로 데이터를 분석하고 판단
+- **표시 계층**: OLED + PC 이중 대시보드로 결과를 시각화
+- **제어 계층**: 판단 결과에 따라 장치를 자동 제어
+
+이것은 실제 **IoT 시스템의 아키텍처**와 동일합니다. 스마트 팩토리, 스마트 시티, 자율주행차 — 모두 이 구조의 확장입니다.
 
 ---
 
@@ -151,31 +537,68 @@ if room_empty and light_on:
 - [ ] 에러가 100회 이상이면 센서를 재초기화한다
 - [ ] `main.py`로 저장하여 전원만 연결하면 자동 시작된다
 
+### 장기 운영 코드 패턴
+
+```python
+# 안정적인 장기 운영 코드 패턴
+import os
+
+MAX_FILE_SIZE = 500_000  # 500KB
+error_count = 0
+
+while True:
+    try:
+        # 센서 읽기 + 대시보드 + 저장
+        ...
+        error_count = 0  # 성공하면 리셋
+
+    except Exception as e:
+        error_count += 1
+        print(f"Error #{error_count}: {e}")
+
+        if error_count > 100:
+            # 센서 재초기화
+            print("센서 재초기화...")
+            machine.reset()
+
+    # 파일 크기 관리
+    try:
+        size = os.stat(LOG_FILE)[6]
+        if size > MAX_FILE_SIZE:
+            f.close()
+            os.rename(LOG_FILE, LOG_FILE + ".bak")
+            f = open(LOG_FILE, "w")
+    except:
+        pass
+
+    time.sleep(10)
+```
+
 ---
 
 ## 시간 배분 가이드
 
-| 시간 | 활동 |
-|------|------|
-| 0:00~0:30 | 프로젝트 선택 + 아키텍처 설계 + 센서 연결 |
-| 0:30~1:00 | 바이브 코딩으로 기본 코드 생성 + 센서 통합 |
-| 1:00~1:30 | OLED 대시보드 + PC 대시보드 구현 |
-| 1:30~2:00 | ML 데이터 수집 + 모델 학습 |
-| 2:00~2:30 | ML 결과를 대시보드에 통합 |
-| 2:30~2:45 | 장기 운영 코드 보강 (에러 핸들링, 파일 관리) |
-| 2:45~3:00 | 산출물 정리 + 시스템 설명 준비 |
+| 시간 | 활동 | Pico Makers 활용 |
+|------|------|------------------|
+| 0:00~0:30 | 프로젝트 설계 + 아키텍처 | AI에게 시스템 설계 상담 |
+| 0:30~1:00 | 센서 통합 배선 | 센서 3개+ 추가 → 핀 충돌 해결 |
+| 1:00~1:30 | OLED 대시보드 구현 | 통합 코드 → AI 코드 리뷰 |
+| 1:30~2:00 | ML 데이터 수집 + 모델 학습 | AI에게 "ML 파이프라인" 요청 |
+| 2:00~2:30 | ML 결과를 대시보드에 통합 | AI에게 "분류 결과 표시" 요청 |
+| 2:30~2:45 | 장기 운영 코드 보강 | 에러 핸들링, 파일 관리 |
+| 2:45~3:00 | 산출물 정리 + 시스템 설명 준비 | 5분 발표 연습 |
 
 ---
 
 ## 산출물 체크리스트
 
-- [ ] **시스템 설계도** -- 센서-처리-표시 아키텍처
-- [ ] **작동하는 코드** -- `main.py`로 Pico에 저장
-- [ ] **이중 대시보드** -- OLED + PC 동시 동작 화면
-- [ ] **ML 결과** -- 학습 데이터, 정확도, 분류 결과
-- [ ] **수집 데이터** -- CSV 파일 (30분 이상)
-- [ ] **시스템 설명서** -- 5분 발표 자료
-- [ ] **바이브 코딩 로그** -- AI 프롬프트와 수정 기록
+- [ ] **시스템 설계도** — 센서-처리-표시 아키텍처
+- [ ] **작동하는 코드** — `main.py`로 Pico에 저장
+- [ ] **이중 대시보드** — OLED + PC 동시 동작 화면
+- [ ] **ML 결과** — 학습 데이터, 정확도, 분류 결과
+- [ ] **수집 데이터** — CSV 파일 (30분 이상)
+- [ ] **시스템 설명서** — 5분 발표 자료
+- [ ] **바이브 코딩 로그** — AI 프롬프트와 수정 기록
 
 ---
 
@@ -189,6 +612,23 @@ if room_empty and light_on:
 | **장기 운영** | 에러 핸들링, 파일 관리 등 안정성이 있는가? | 우수 |
 | **실제 문제 해결** | 실제 환경의 문제를 의미 있게 해결하는가? | 탁월 |
 | **시스템 설명** | 전체 시스템을 논리적으로 설명할 수 있는가? | 탁월 |
+
+---
+
+## 트러블슈팅
+
+### 센서 3개 이상 연결했는데 I2C 에러가 나요
+- `i2c.scan()`으로 연결된 장치 주소를 확인하세요. 모든 장치가 보여야 합니다.
+- I2C 케이블이 너무 길면 통신이 불안정할 수 있습니다. 짧은 케이블을 사용하세요.
+- 전원이 부족할 수 있습니다. USB 허브가 아닌 PC에 직접 연결하세요.
+
+### PC 대시보드에서 Serial 데이터가 안 들어와요
+- Thonny가 열려 있으면 Serial 포트를 점유합니다. Thonny를 닫은 뒤 PC 스크립트를 실행하세요.
+- Serial 포트 이름이 맞는지 확인하세요 (Mac: `/dev/tty.usbmodem*`, Windows: `COM*`).
+
+### ML 데이터 수집 중 파일이 안 만들어져요
+- Pico 저장 공간을 확인하세요. 기존 파일을 삭제하여 공간을 확보하세요.
+- 파일명에 특수문자가 없는지 확인하세요.
 
 ---
 

@@ -30,113 +30,394 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ---
 
+## 준비물
+
+| 준비물 | 설명 |
+|--------|------|
+| Raspberry Pi Pico 2 WH + Grove Shield | 기본 하드웨어 |
+| OLED 디스플레이 (SSD1306) | 128×64 대시보드 표시용 |
+| 센서 2개 이상 (프로젝트별) | 아래 예시 참고 |
+| AI 챗봇 | Claude, ChatGPT 등 — 바이브 코딩에 사용 |
+
+### 센서 조합 시 주의사항
+
+:::caution[핀 충돌 주의]
+- **초음파 센서**(GP16, GP17)와 **부저**(기본 GP16)는 핀이 겹칩니다. 함께 사용할 때는 부저를 **GP18**에 연결하세요.
+- **빛 센서**(A0=GP26)와 **소리 센서**(A2=GP27)는 각각 다른 ADC 포트를 사용합니다. 바꿔 꽂지 않도록 주의하세요.
+- **I2C 센서들**(DHT20, SCD41, OLED)은 모두 주소가 다르므로 같은 I2C 버스에서 공존 가능합니다.
+:::
+
+---
+
 ## 예시 프로젝트 3가지
 
 <Tabs>
-  <TabItem label="스마트 환기 시스템">
+  <TabItem label="🌬️ 스마트 환기 시스템">
 
 ### 프로젝트 1: 스마트 환기 시스템
 
-**센서:** DHT20 온습도 (I2C) + SGP30 공기질 (I2C)
+**센서:** DHT20 온습도 (I2C, 0x38) + SCD41 CO2 (I2C, 0x62) + OLED (I2C, 0x3C)
+
+**아이디어:** CO2 농도와 온도를 종합 판단하여 환기 필요성을 자동으로 알려줍니다. CO2가 1500ppm 넘고 온도가 높으면 "VENT NOW!", 1000ppm 넘거나 온도가 높으면 "Vent Soon"으로 단계별 경고를 표시합니다.
 
 **스마트 판단 로직:**
 ```
-CO2 > 1000ppm AND 온도 > 25°C → "즉시 환기!"
-CO2 > 800ppm OR 습도 > 70% → "환기 권장"
-그 외 → "쾌적"
+CO2 > 1500 OR 온도 > 30°C → "VENT NOW!" (반전 표시)
+CO2 > 1000 OR 온도 > 28°C → "Vent Soon"
+그 외 → "Good"
 ```
 
 **OLED 대시보드 설계:**
 ```
 +---------------------------+
-| Temp: 24.5C  Humid: 58%   |
-| CO2: 823ppm  TVOC: 45ppb  |
-| ████████░░░ Comfort: OK   |
-| -> 환기 권장               |
+| == Smart Vent ==          |
+| CO2 : 1234 ppm            |
+| Temp: 25.3 C              |
+| Humi: 58.2 %              |
+| >> VENT NOW! <<           |  ← 반전(흰 배경, 검은 글씨)
 +---------------------------+
 ```
 
+**연결:** 세 장치 모두 I2C 통신 — 같은 I2C1 버스에 연결 (주소: DHT20=0x38, SCD41=0x62, OLED=0x3C)
+
+:::note[SCD41 센서 특성]
+SCD41은 `start_periodic_measurement` 명령(0x21, 0xB1)을 **한 번만** 보내면, 이후 5초마다 자동으로 CO2를 측정합니다. 매 루프마다 시작 명령을 보내면 5초 지연이 반복되므로, 반드시 루프 밖에서 한 번만 호출하세요.
+:::
+
+#### 전체 코드
+
+```python
+from machine import I2C, Pin
+import time
+
+# ── I2C 설정 (DHT20 + SCD41 + OLED 공유) ──
+i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
+dht_addr = 0x38
+scd_addr = 0x62
+time.sleep(0.1)
+
+from ssd1306 import SSD1306_I2C
+oled = SSD1306_I2C(128, 64, i2c)
+
+def read_dht20():
+    i2c.writeto(dht_addr, bytes([0xAC, 0x33, 0x00]))
+    time.sleep(0.08)
+    data = i2c.readfrom(dht_addr, 7)
+    humi = ((data[1] << 12) | (data[2] << 4) | (data[3] >> 4)) / 1048576 * 100
+    temp = (((data[3] & 0x0F) << 16) | (data[4] << 8) | data[5]) / 1048576 * 200 - 50
+    return round(temp, 1), round(humi, 1)
+
+def read_scd41():
+    # 데이터 읽기 (주기 측정 모드에서 자동 갱신됨)
+    i2c.writeto(scd_addr, bytes([0xEC, 0x05]))
+    time.sleep(0.01)
+    data = i2c.readfrom(scd_addr, 9)
+    co2 = (data[0] << 8) | data[1]
+    return co2
+
+# SCD41 주기 측정 시작 (한 번만 호출)
+i2c.writeto(scd_addr, bytes([0x21, 0xB1]))
+print("SCD41 준비 중... 5초 대기")
+time.sleep(5)
+
+def judge_ventilation(co2, temp, humi):
+    if co2 > 1500 or temp > 30:
+        return "VENT NOW!", True
+    elif co2 > 1000 or temp > 28:
+        return "Vent Soon", True
+    else:
+        return "Good", False
+
+# ── 메인 루프 ──
+while True:
+    temp, humi = read_dht20()
+    co2 = read_scd41()
+    status, need_vent = judge_ventilation(co2, temp, humi)
+
+    # OLED 대시보드
+    oled.fill(0)
+    oled.text("== Smart Vent ==", 0, 0)
+    oled.text(f"CO2 : {co2} ppm", 4, 14)
+    oled.text(f"Temp: {temp} C", 4, 26)
+    oled.text(f"Humi: {humi} %", 4, 38)
+    if need_vent:
+        oled.fill_rect(0, 52, 128, 12, 1)
+        oled.text(f">> {status} <<", 16, 54, 0)
+    else:
+        oled.text(f"[{status}]", 4, 54)
+    oled.show()
+
+    print(f"CO2:{co2}ppm T:{temp}C H:{humi}% [{status}]")
+    time.sleep(5)
+```
+
+#### 줄별 해설
+
+| 줄 | 코드 | 설명 |
+|----|------|------|
+| 4-7 | I2C 설정 | DHT20(0x38), SCD41(0x62), OLED(0x3C)이 같은 I2C1 버스를 공유합니다. 주소가 모두 다르므로 충돌하지 않습니다. |
+| 22-26 | `read_scd41()` | 읽기 명령(0xEC, 0x05)만 보냅니다. 시작 명령은 루프 밖에서 이미 보냈으므로 여기서 다시 보내지 않습니다. |
+| 29-31 | 주기 측정 시작 | `bytes([0x21, 0xB1])`은 "5초마다 자동으로 측정하라"는 명령입니다. **한 번만** 호출합니다. |
+| 46-49 | 반전 표시 | `fill_rect`로 흰 배경을 그린 뒤, `oled.text(..., 0)`으로 검은 글씨를 씁니다. 경고를 눈에 띄게 만듭니다. |
+
 **바이브 코딩 활용 포인트:**
-- OLED 레이아웃 코드를 AI에게 요청하세요
-- 프롬프트 예시: "Pico 2 WH에서 DHT20과 SGP30 센서를 동시에 읽어서, SSD1306 OLED에 환기 대시보드를 표시하는 MicroPython 코드를 작성해줘"
+- OLED 레이아웃 코드를 AI에게 요청하세요.
+- 프롬프트 예시: "Pico 2 WH에서 DHT20과 SCD41 센서를 동시에 읽어서, SSD1306 OLED에 환기 대시보드를 표시하는 MicroPython 코드를 작성해줘. I2C1(SDA=GP6, SCL=GP7) 사용."
 
 **확장 아이디어:**
 - 환기 시작/종료 시 CO2 변화를 기록하여 환기 효과 측정
 - LED로 환기 상태를 색상으로 표시
+- CSV 파일에 CO2 히스토리 저장
 
 {/* end */}
 
   </TabItem>
-  <TabItem label="보안 시스템">
+  <TabItem label="🔒 간이 보안 시스템">
 
 ### 프로젝트 2: 간이 보안 시스템
 
-**센서:** 초음파 거리 센서 (Digital) + 소리 센서 (ADC)
+**센서:** 초음파 거리 센서 (Digital, GP16+GP17) + 소리 센서 (ADC, GP27) + 부저 (PWM, GP18) + OLED
+
+**아이디어:** 거리 감지와 소음 감지를 조합하여 침입을 판별합니다. 거리가 가까워지면서 소리도 나면 "INTRUDER!" 경보, 둘 중 하나만이면 "ALERT!" 주의, 둘 다 아니면 "Safe"입니다.
 
 **스마트 판단 로직:**
 ```
-거리 < 30cm AND 소음 > 60% → "침입 감지! 경보!"
-거리 < 30cm → "물체 접근"
-소음 > 80% → "큰 소리 감지"
-그 외 → "안전"
+거리 < 50cm AND 소음 > 40% → "INTRUDER!" (부저 강하게)
+거리 < 50cm OR 소음 > 40%  → "ALERT!" (부저 약하게)
+그 외 → "Safe" (부저 꺼짐)
 ```
 
-**OLED 대시보드 설계:**
+:::caution[핀 충돌 해결]
+초음파 센서가 GP16(TRIG)과 GP17(ECHO)을 사용합니다. 부저의 기본 핀도 GP16이므로, 이 프로젝트에서는 부저를 **GP18**에 연결합니다.
+:::
+
+#### 전체 코드
+
+```python
+from machine import Pin, ADC, PWM, I2C, time_pulse_us
+import time
+
+# ── 초음파 센서 설정 ──
+trig = Pin(16, Pin.OUT)
+echo = Pin(17, Pin.IN)
+
+# ── 소리 센서 설정 (Grove A2: GP27) ──
+sound = ADC(Pin(27))
+
+# ── 부저 설정 (GP18 — 초음파가 GP16 사용하므로 대체 핀) ──
+buzzer = PWM(Pin(18))
+buzzer.duty_u16(0)
+
+# ── OLED 설정 ──
+i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
+from ssd1306 import SSD1306_I2C
+oled = SSD1306_I2C(128, 64, i2c)
+
+DIST_THRESHOLD = 50    # cm 이내 감지
+SOUND_THRESHOLD = 40   # % 이상 감지
+
+def read_distance():
+    trig.value(0)
+    time.sleep_us(5)
+    trig.value(1)
+    time.sleep_us(10)
+    trig.value(0)
+    duration = time_pulse_us(echo, 1, 30000)
+    if duration < 0:
+        return 999
+    return round(duration / 58, 1)
+
+def read_sound():
+    return sound.read_u16() / 65535 * 100
+
+def alarm_on(level):
+    freq = 1000 + level * 500
+    buzzer.freq(freq)
+    buzzer.duty_u16(32768)
+
+def alarm_off():
+    buzzer.duty_u16(0)
+
+# ── 메인 루프 ──
+while True:
+    dist = read_distance()
+    noise = read_sound()
+
+    # 침입 판단: 거리 가까움 AND 소리 감지
+    dist_alert = dist < DIST_THRESHOLD
+    sound_alert = noise > SOUND_THRESHOLD
+
+    if dist_alert and sound_alert:
+        status = "INTRUDER!"
+        alarm_on(3)
+    elif dist_alert or sound_alert:
+        status = "ALERT!"
+        alarm_on(1)
+    else:
+        status = "Safe"
+        alarm_off()
+
+    # OLED 대시보드
+    oled.fill(0)
+    oled.text("== Security ==", 8, 0)
+    oled.text(f"Dist: {dist:.0f} cm", 4, 16)
+    oled.text(f"Noise: {noise:.0f} %", 4, 28)
+    oled.text(f"[{status}]", 4, 44)
+    oled.show()
+
+    print(f"D:{dist:.0f}cm N:{noise:.0f}% [{status}]")
+    time.sleep(0.3)
 ```
-+---------------------------+
-| Dist: 45.2cm  Noise: 23%  |
-| ████░░░░░░ Security: SAFE |
-| Alert count: 3            |
-| Last: 14:32               |
-+---------------------------+
-```
+
+#### 줄별 해설
+
+| 줄 | 코드 | 설명 |
+|----|------|------|
+| 4-5 | `Pin(16, Pin.OUT)` | 초음파 센서의 TRIG 핀(신호 송신)과 ECHO 핀(신호 수신)입니다. |
+| 11-12 | `PWM(Pin(18))` | GP18에 부저를 연결합니다. PWM으로 주파수와 볼륨을 조절할 수 있습니다. |
+| 28 | `time_pulse_us(echo, 1, 30000)` | ECHO 핀이 HIGH가 되는 시간을 마이크로초 단위로 측정합니다. 이 시간을 거리로 변환합니다. |
+| 30 | `duration / 58` | 소리 속도(약 340m/s)로 왕복 거리를 계산합니다. 58은 변환 상수입니다. |
+| 35-37 | `alarm_on(level)` | 경보 레벨에 따라 부저 주파수를 바꿉니다. 레벨 3이면 2500Hz(높은 음), 레벨 1이면 1500Hz(낮은 음)입니다. |
 
 **바이브 코딩 활용 포인트:**
-- 초음파 센서 + 소리 센서 동시 읽기 코드를 AI에게 요청하세요
-- 경보 이벤트를 CSV 로그로 저장하는 코드도 요청할 수 있어요
+- 경보 이벤트를 CSV 로그로 저장하는 코드를 AI에게 요청하세요.
+- 프롬프트 예시: "위 보안 시스템 코드에 경보 발생 시 시간과 상태를 CSV 파일로 기록하는 기능을 추가해줘."
 
 **확장 아이디어:**
-- 경보 발생 시 부저(buzzer) 울리기
-- 경보 이벤트 이력을 시간과 함께 기록
+- 경보 발생 이력을 시간과 함께 CSV에 기록
+- 일정 시간 동안 경보가 없으면 "SECURED" 메시지 표시
+- OLED에 경보 횟수 카운터 추가
 
 {/* end */}
 
   </TabItem>
-  <TabItem label="쾌적도 대시보드">
+  <TabItem label="🏠 종합 쾌적도 대시보드">
 
 ### 프로젝트 3: 종합 쾌적도 대시보드
 
-**센서:** DHT20 온습도 (I2C) + 빛 센서 (ADC) + 소리 센서 (ADC)
+**센서:** DHT20 온습도 (I2C) + 빛 센서 (ADC, GP26) + 소리 센서 (ADC, GP27) + OLED
 
-**스마트 판단 로직:**
+**아이디어:** 온도, 습도, 밝기, 소음 4가지 환경 요소를 동시에 측정하고, 각 항목의 점수를 계산하여 종합 쾌적도(0~100점)를 표시합니다.
+
+**점수 계산 로직:**
 ```python
-# 각 항목별 점수 (0~100)
-temp_score = 100 if 20 <= temp <= 26 else 50 if 18 <= temp <= 28 else 0
-light_score = 100 if 30 <= brightness <= 70 else 50
-noise_score = 100 if noise < 30 else 50 if noise < 60 else 0
-
-# 종합 쾌적도
-comfort = (temp_score + light_score + noise_score) / 3
+# 각 항목 0~100점, 4개 평균 = 종합 쾌적도
+temp_score:  20~26°C → 100점, 18~28°C → 70점, 나머지 → 30점
+humi_score:  40~60% → 100점, 30~70% → 70점, 나머지 → 30점
+light_score: 30~70% → 100점, 나머지 → 50점
+noise_score: 100 - noise_pct (낮을수록 좋음)
 ```
 
 **OLED 대시보드 설계:**
 ```
 +---------------------------+
-| T:24C H:55% L:62% N:25%  |
-| Temp  ████████░░ 85pt     |
-| Light ██████░░░░ 65pt     |
-| Noise █████████░ 95pt     |
-| Total: 82pt [GOOD]        |
+|     == Comfort ==         |
+| T:24C H:55%               |
+| L:62% N:25%               |
+| Score: 84/100             |
+| ████████████████████░░░░  |
 +---------------------------+
 ```
 
+#### 전체 코드
+
+```python
+from machine import I2C, Pin, ADC
+import time
+
+# ── 센서 설정 ──
+i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
+dht_addr = 0x38
+light = ADC(Pin(26))  # Grove A0 포트
+sound = ADC(Pin(27))  # Grove A2 포트
+time.sleep(0.1)
+
+from ssd1306 import SSD1306_I2C
+oled = SSD1306_I2C(128, 64, i2c)
+
+def read_dht20():
+    i2c.writeto(dht_addr, bytes([0xAC, 0x33, 0x00]))
+    time.sleep(0.08)
+    data = i2c.readfrom(dht_addr, 7)
+    humi = ((data[1] << 12) | (data[2] << 4) | (data[3] >> 4)) / 1048576 * 100
+    temp = (((data[3] & 0x0F) << 16) | (data[4] << 8) | data[5]) / 1048576 * 200 - 50
+    return round(temp, 1), round(humi, 1)
+
+def calc_comfort(temp, humi, light_pct, noise_pct):
+    # 온도 점수 (20~26도가 최적)
+    if 20 <= temp <= 26:
+        t_score = 100
+    elif 18 <= temp <= 28:
+        t_score = 70
+    else:
+        t_score = 30
+
+    # 습도 점수 (40~60%가 최적)
+    if 40 <= humi <= 60:
+        h_score = 100
+    elif 30 <= humi <= 70:
+        h_score = 70
+    else:
+        h_score = 30
+
+    # 조도 점수 (30~70%가 최적)
+    if 30 <= light_pct <= 70:
+        l_score = 100
+    else:
+        l_score = 50
+
+    # 소음 점수 (낮을수록 좋음)
+    n_score = max(0, 100 - noise_pct)
+
+    total = (t_score + h_score + l_score + n_score) // 4
+    return total
+
+# ── CSV 파일 준비 ──
+f = open("comfort_log.csv", "a")
+f.write("time_s,temp,humi,light,noise,score\n")
+start = time.ticks_ms()
+
+# ── 메인 루프 ──
+while True:
+    temp, humi = read_dht20()
+    light_pct = light.read_u16() / 65535 * 100
+    noise_pct = sound.read_u16() / 65535 * 100
+    score = calc_comfort(temp, humi, light_pct, noise_pct)
+    elapsed = time.ticks_diff(time.ticks_ms(), start) // 1000
+
+    # OLED 대시보드
+    oled.fill(0)
+    oled.text("== Comfort ==", 12, 0)
+    oled.text(f"T:{temp}C H:{humi}%", 4, 14)
+    oled.text(f"L:{light_pct:.0f}% N:{noise_pct:.0f}%", 4, 26)
+    oled.text(f"Score: {score}/100", 4, 42)
+    # 점수 막대그래프
+    oled.fill_rect(4, 56, score, 6, 1)
+    oled.show()
+
+    # CSV 저장
+    f.write(f"{elapsed},{temp},{humi},{light_pct:.0f},{noise_pct:.0f},{score}\n")
+    f.flush()
+
+    print(f"T:{temp} H:{humi} L:{light_pct:.0f} N:{noise_pct:.0f} => {score}점")
+    time.sleep(2)
+```
+
+#### 줄별 해설
+
+| 줄 | 코드 | 설명 |
+|----|------|------|
+| 7-8 | `ADC(Pin(26))`, `ADC(Pin(27))` | 빛 센서(A0=GP26)와 소리 센서(A2=GP27)를 각각 다른 ADC 핀에 연결합니다. |
+| 22-43 | `calc_comfort()` | 4개 항목(온도, 습도, 조도, 소음)에 각각 0~100점을 매기고, 평균을 구합니다. 이것이 종합 쾌적도 점수입니다. |
+| 55-56 | `light.read_u16() / 65535 * 100` | ADC 원시값(0~65535)을 퍼센트(0~100%)로 변환합니다. |
+
 **바이브 코딩 활용 포인트:**
-- 3개 센서 동시 읽기 + OLED 4행 대시보드를 AI에게 요청하세요
-- 쾌적도 점수 계산 로직도 AI와 함께 설계할 수 있어요
+- 3개 센서 동시 읽기 + OLED 대시보드를 AI에게 요청하세요.
+- 쾌적도 점수 계산 로직도 AI와 함께 설계할 수 있어요.
 
 **확장 아이디어:**
-- 시간대별 쾌적도 변화를 CSV로 기록
-- 쾌적도가 낮아지는 패턴 분석
+- 시간대별 쾌적도 변화를 CSV로 기록하고, matplotlib으로 그래프 그리기
+- 쾌적도가 낮아지는 패턴을 분석하여 개선 방안 제시
 
 {/* end */}
 
@@ -145,27 +426,76 @@ comfort = (temp_score + light_score + noise_score) / 3
 
 ---
 
+## 잠깐, 방금 무슨 일이 일어난 걸까요?
+
+Lv.1에서는 센서 **하나**의 데이터를 읽어 대시보드에 표시했습니다.
+
+Lv.2에서는 센서 **여러 개**의 데이터를 **종합적으로 판단**하는 시스템을 만들었습니다.
+
+이 차이는 생각보다 큽니다:
+- "온도가 28도다" → **정보**
+- "온도가 28도이고 CO2가 1200ppm이다 → 환기 필요!" → **지능적 판단**
+
+여러분이 만든 시스템은 단순히 숫자를 보여주는 것이 아니라, **여러 데이터를 조합하여 의미 있는 결론을 내리는** 시스템입니다. 이것이 바로 "스마트"의 핵심이에요.
+
+실제 스마트 홈, 스마트 빌딩, 자율주행차 — 모두 이 원리를 대규모로 확장한 것입니다.
+
+---
+
+## 바이브 코딩 활용 전략
+
+Lv.2부터는 바이브 코딩이 핵심 도구입니다. 효과적인 프롬프트 작성법을 익혀봅시다.
+
+### 좋은 프롬프트의 3요소
+
+1. **맥락**: 어떤 하드웨어를 사용하는지 (Pico 2 WH, Grove Shield, I2C1)
+2. **구체적 요청**: 어떤 기능을 만들고 싶은지 (CO2 + 온도 → 환기 판단)
+3. **제약 조건**: 센서 주소, 핀 번호, OLED 크기 등
+
+### 프롬프트 예시
+
+```
+나는 Pico 2 WH에 Grove Shield를 사용하고 있어.
+I2C1(SDA=GP6, SCL=GP7)에 다음 장치들을 연결했어:
+- SCD41 CO2 센서 (주소 0x62)
+- DHT20 온습도 센서 (주소 0x38)
+- SSD1306 OLED (주소 0x3C)
+
+SCD41의 start_periodic_measurement 명령은 bytes([0x21, 0xB1])이고,
+read_measurement 명령은 bytes([0xEC, 0x05])야.
+시작 명령은 한 번만 보내고, 이후 5초마다 읽기만 하면 돼.
+
+CO2가 1000ppm 넘으면 환기 경고를 OLED에 반전 표시해주는
+MicroPython 코드를 만들어줘.
+```
+
+:::tip[Pico Makers 활용]
+[Pico Makers](https://pico-makers.vercel.app)에서 Course B 모드를 선택하면, 각 레벨의 프로젝트 예시와 센서별 배선 정보를 확인할 수 있어요. 센서를 추가한 뒤 "통합 코드"를 AI 프롬프트에 함께 붙여넣으면 더 정확한 결과를 얻을 수 있습니다.
+:::
+
+---
+
 ## 시간 배분 가이드
 
-| 시간 | 활동 | 팁 |
-|------|------|-----|
-| 0:00~0:20 | 프로젝트 선택 + 센서 2개 연결 | 센서 포트 충돌에 주의하세요 |
-| 0:20~0:50 | 바이브 코딩으로 기본 코드 생성 | AI 프롬프트를 구체적으로 작성하세요 |
-| 0:50~1:30 | AI 코드 수정 + 디버깅 | 센서 주소, 포트 확인이 핵심이에요 |
-| 1:30~2:00 | 복합 조건 로직 추가 | and/or 조건으로 스마트 판단을 구현하세요 |
-| 2:00~2:20 | OLED 대시보드 개선 | 레이아웃을 보기 좋게 다듬으세요 |
-| 2:20~2:40 | 테스트 + CSV 저장 확인 | 실제 상황에서 테스트하세요 |
-| 2:40~3:00 | 산출물 정리 + 발표 준비 | 바이브 코딩 프롬프트도 기록하세요 |
+| 시간 | 활동 | Pico Makers 활용 |
+|------|------|------------------|
+| 0:00~0:20 | 프로젝트 선택 + 센서 2개 연결 | 센서 2개+ 추가 → 핀 충돌 자동 확인 |
+| 0:20~0:50 | 바이브 코딩으로 기본 코드 생성 | 통합 코드 복사 → AI에게 수정 요청 |
+| 0:50~1:30 | AI 코드 수정 + 디버깅 | 에러 진단 → AI 수정 안내 |
+| 1:30~2:00 | 복합 조건 로직 추가 | AI에게 "and/or 조건 판단" 요청 |
+| 2:00~2:20 | OLED 대시보드 개선 | AI에게 "대시보드 디자인 개선" 요청 |
+| 2:20~2:40 | 테스트 + CSV 저장 확인 | 실제 상황에서 테스트 |
+| 2:40~3:00 | 산출물 정리 + 발표 준비 | 바이브 코딩 프롬프트도 기록 |
 
 ---
 
 ## 산출물 체크리스트
 
-- [ ] **작동하는 코드** -- `main.py`로 Pico에 저장
-- [ ] **OLED 대시보드 사진** -- 복합 센서 데이터가 표시된 화면
-- [ ] **바이브 코딩 로그** -- AI에게 보낸 프롬프트와 수정한 부분 기록
-- [ ] **데이터 기록** -- CSV 파일 또는 화면 캡처
-- [ ] **한 줄 설명** -- "이 프로젝트는 ___와(과) ___를 종합하여 ___을(를) 판단하는 시스템이에요"
+- [ ] **작동하는 코드** — `main.py`로 Pico에 저장
+- [ ] **OLED 대시보드 사진** — 복합 센서 데이터가 표시된 화면
+- [ ] **바이브 코딩 로그** — AI에게 보낸 프롬프트와 수정한 부분 기록
+- [ ] **데이터 기록** — CSV 파일 또는 화면 캡처
+- [ ] **한 줄 설명** — "이 프로젝트는 ___와(과) ___를 종합하여 ___을(를) 판단하는 시스템이에요"
 
 ---
 
@@ -182,8 +512,25 @@ comfort = (temp_score + light_score + noise_score) / 3
 
 ---
 
+## 트러블슈팅
+
+### SCD41에서 CO2 값이 0이 나와요
+- `start_periodic_measurement` 명령(`bytes([0x21, 0xB1])`)을 보냈는지 확인하세요.
+- 시작 명령 후 **5초를 기다린 뒤** 읽기를 시작해야 합니다.
+- `i2c.scan()`으로 0x62가 보이는지 확인하세요.
+
+### 부저에서 소리가 안 나요
+- 초음파 센서와 함께 사용할 때, 부저 핀이 **GP18**인지 확인하세요 (GP16이 아님).
+- `buzzer.duty_u16(0)`이면 소리가 꺼진 상태입니다. `duty_u16(32768)` 이상이어야 들립니다.
+
+### 센서 값이 서로 간섭하는 것 같아요
+- I2C 센서들은 주소가 다르면 간섭하지 않습니다. `i2c.scan()`으로 모든 장치가 보이는지 확인하세요.
+- ADC 센서(빛, 소리)는 핀이 다르므로 간섭하지 않지만, 케이블이 너무 가까우면 노이즈가 생길 수 있습니다.
+
+---
+
 ## 다음 레벨로
 
 :::tip[Lv.2를 마쳤다면]
-멋져요! 다음 도전은 [Lv.3 연구자](/ai-physical-computing/course-b/lv3/)예요. 가설을 세우고, 장기 데이터를 수집하고, AI로 분석하는 본격적인 연구 프로젝트를 해봐요.
+멋져요! 다음 도전은 [Lv.3 연구자](/ai-physical-computing/course-b/lv3/)예요. 가설을 세우고, 장기 데이터를 수집하고, AI로 분석하는 본격적인 연구 프로젝트를 해봐요. 예를 들어, "30명 교실에서 환기 없이 40분이 지나면 CO2가 1500ppm을 넘을까?"를 검증할 수 있어요!
 :::

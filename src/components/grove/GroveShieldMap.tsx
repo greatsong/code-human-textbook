@@ -72,6 +72,12 @@ const KEYFRAMES = `
 }
 `;
 
+// === 센서 이름을 개별 항목으로 분리 ===
+// "SCD41+DHT20+OLED" → ["SCD41", "DHT20", "OLED"]
+function parseSensorNames(sensorName: string): string[] {
+  return sensorName.split('+').map(s => s.trim()).filter(Boolean);
+}
+
 // === 개별 포트 커넥터 컴포넌트 ===
 
 function GroveConnector({
@@ -79,7 +85,7 @@ function GroveConnector({
   position,
   isActive,
   isHovered,
-  connectedSensor,
+  sensorNames,
   onMouseEnter,
   onMouseLeave,
   onClick,
@@ -88,12 +94,14 @@ function GroveConnector({
   position: { x: number; y: number };
   isActive: boolean;
   isHovered: boolean;
-  connectedSensor?: string;
+  sensorNames: string[];
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onClick: () => void;
 }) {
   const { x, y } = position;
+  const hasMultiple = sensorNames.length > 1;
+  const hasSensor = sensorNames.length > 0;
 
   return (
     <g
@@ -185,8 +193,8 @@ function GroveConnector({
         {port.gpio}
       </text>
 
-      {/* 연결된 센서 표시 */}
-      {connectedSensor && (
+      {/* 연결된 센서 표시 — 1개일 때 */}
+      {hasSensor && !hasMultiple && (
         <g>
           <rect
             x={x - 30}
@@ -206,10 +214,71 @@ function GroveConnector({
             fill={port.color}
             fontWeight={500}
           >
-            {connectedSensor.length > 8
-              ? connectedSensor.slice(0, 7) + '...'
-              : connectedSensor}
+            {sensorNames[0].length > 10
+              ? sensorNames[0].slice(0, 9) + '...'
+              : sensorNames[0]}
           </text>
+        </g>
+      )}
+
+      {/* 연결된 센서 표시 — 여러 개일 때 (Y-스플리터) */}
+      {hasMultiple && (
+        <g>
+          {/* Y-스플리터 시각화: 포트에서 분기하는 선 */}
+          <line x1={x} y1={y + 16} x2={x} y2={y + 34} stroke={port.color} strokeWidth={1.5} opacity={0.5} />
+
+          {sensorNames.map((name, i) => {
+            const count = sensorNames.length;
+            // 센서들을 포트 아래에 부채꼴로 배치
+            const spread = Math.min(count * 28, 80);
+            const offsetX = (i - (count - 1) / 2) * (spread / Math.max(count - 1, 1));
+            const labelY = y + 48 + (count > 3 ? (i % 2) * 16 : 0);
+
+            return (
+              <g key={i}>
+                {/* 분기선 */}
+                <line
+                  x1={x}
+                  y1={y + 34}
+                  x2={x + offsetX}
+                  y2={labelY - 8}
+                  stroke={port.color}
+                  strokeWidth={1}
+                  opacity={0.4}
+                />
+                {/* 분기 끝 점 */}
+                <circle cx={x + offsetX} cy={labelY - 8} r={2} fill={port.color} opacity={0.6} />
+                {/* 센서 라벨 */}
+                <rect
+                  x={x + offsetX - 26}
+                  y={labelY - 6}
+                  width={52}
+                  height={14}
+                  rx={3}
+                  fill={port.color}
+                  opacity={0.12}
+                  stroke={port.color}
+                  strokeWidth={0.5}
+                  strokeOpacity={0.3}
+                />
+                <text
+                  x={x + offsetX}
+                  y={labelY + 4}
+                  textAnchor="middle"
+                  fontSize={7}
+                  fontFamily="system-ui, sans-serif"
+                  fill={port.color}
+                  fontWeight={500}
+                >
+                  {name.length > 8 ? name.slice(0, 7) + '…' : name}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Y-스플리터 아이콘 */}
+          <circle cx={x} cy={y + 34} r={4} fill="#1e293b" stroke={port.color} strokeWidth={1} />
+          <text x={x} y={y + 37} textAnchor="middle" fontSize={6} fill={port.color} fontWeight={700}>Y</text>
         </g>
       )}
     </g>
@@ -221,14 +290,19 @@ function GroveConnector({
 function Tooltip({
   port,
   position,
-  connectedSensor,
+  sensorNames,
 }: {
   port: PortInfo;
   position: { x: number; y: number };
-  connectedSensor?: string;
+  sensorNames: string[];
 }) {
-  const tooltipWidth = 180;
-  const tooltipHeight = connectedSensor ? 100 : 82;
+  const hasSensors = sensorNames.length > 0;
+  const hasMultiple = sensorNames.length > 1;
+  const tooltipWidth = 200;
+  const baseHeight = hasSensors ? 82 : 70;
+  const sensorLineHeight = hasMultiple ? sensorNames.length * 14 + 18 : (hasSensors ? 16 : 0);
+  const tooltipHeight = baseHeight + sensorLineHeight;
+
   // 툴팁이 SVG 밖으로 나가지 않도록 위치 조정
   let tx = position.x - tooltipWidth / 2;
   if (tx < 5) tx = 5;
@@ -267,11 +341,29 @@ function Tooltip({
       <text x={tx + 12} y={ty + 55} fontSize={10} fill="#94a3b8" fontFamily="system-ui, sans-serif">
         사용 가능: <tspan fill="#cbd5e1">{port.sensorExamples}</tspan>
       </text>
-      {/* 연결된 센서 */}
-      {connectedSensor && (
+
+      {/* 연결된 센서 — 1개일 때 */}
+      {hasSensors && !hasMultiple && (
         <text x={tx + 12} y={ty + 72} fontSize={10} fill="#94a3b8" fontFamily="system-ui, sans-serif">
-          연결됨: <tspan fill={port.color} fontWeight={600}>{connectedSensor}</tspan>
+          연결됨: <tspan fill={port.color} fontWeight={600}>{sensorNames[0]}</tspan>
         </text>
+      )}
+
+      {/* 연결된 센서 — 여러 개일 때 */}
+      {hasMultiple && (
+        <g>
+          <text x={tx + 12} y={ty + 72} fontSize={10} fill="#94a3b8" fontFamily="system-ui, sans-serif">
+            연결됨 (<tspan fill="#f59e0b">Y-스플리터 필요</tspan>):
+          </text>
+          {sensorNames.map((name, i) => (
+            <g key={i}>
+              <circle cx={tx + 18} cy={ty + 84 + i * 14} r={2.5} fill={port.color} />
+              <text x={tx + 26} y={ty + 88 + i * 14} fontSize={10} fill={port.color} fontWeight={500} fontFamily="system-ui, sans-serif">
+                {name}
+              </text>
+            </g>
+          ))}
+        </g>
       )}
     </g>
   );
@@ -287,16 +379,27 @@ export default function GroveShieldMap({
 }: GroveShieldMapProps) {
   const [hoveredPort, setHoveredPort] = useState<string | null>(null);
 
-  const sensorMap = new Map(connectedSensors.map((s) => [s.port, s.sensorName]));
+  // 같은 포트에 여러 센서가 연결된 경우를 처리
+  // "SCD41+DHT20+OLED" 형태도 개별 분리
+  const sensorsByPort = new Map<string, string[]>();
+  for (const s of connectedSensors) {
+    const names = parseSensorNames(s.sensorName);
+    const existing = sensorsByPort.get(s.port) || [];
+    sensorsByPort.set(s.port, [...existing, ...names]);
+  }
 
   const hoveredInfo = PORTS.find((p) => p.name === hoveredPort);
   const hoveredPos = hoveredPort ? PORT_POSITIONS[hoveredPort] : null;
+
+  // SVG 높이 — 센서가 많으면 아래로 늘어나므로 여유 확보
+  const maxSensorsOnPort = Math.max(0, ...Array.from(sensorsByPort.values()).map(v => v.length));
+  const svgHeight = maxSensorsOnPort > 2 ? 310 : 280;
 
   return (
     <div className={className} style={{ width: '100%', maxWidth: 640 }}>
       <style>{KEYFRAMES}</style>
       <svg
-        viewBox="0 0 600 280"
+        viewBox={`0 0 600 ${svgHeight}`}
         xmlns="http://www.w3.org/2000/svg"
         style={{ width: '100%', height: 'auto', display: 'block' }}
         role="img"
@@ -357,7 +460,7 @@ export default function GroveShieldMap({
             position={PORT_POSITIONS[port.name]}
             isActive={activePort === port.name}
             isHovered={hoveredPort === port.name}
-            connectedSensor={sensorMap.get(port.name)}
+            sensorNames={sensorsByPort.get(port.name) || []}
             onMouseEnter={() => setHoveredPort(port.name)}
             onMouseLeave={() => setHoveredPort(null)}
             onClick={() => onPortClick?.(port)}
@@ -369,7 +472,7 @@ export default function GroveShieldMap({
           <Tooltip
             port={hoveredInfo}
             position={hoveredPos}
-            connectedSensor={sensorMap.get(hoveredInfo.name)}
+            sensorNames={sensorsByPort.get(hoveredInfo.name) || []}
           />
         )}
       </svg>
@@ -407,6 +510,28 @@ export default function GroveShieldMap({
             {label}
           </span>
         ))}
+
+        {/* Y-스플리터 범례 — 여러 센서가 같은 포트에 연결된 경우에만 표시 */}
+        {maxSensorsOnPort > 1 && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#f59e0b' }}>
+            <span
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: '50%',
+                border: '1.5px solid #f59e0b',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 8,
+                fontWeight: 700,
+              }}
+            >
+              Y
+            </span>
+            Y-스플리터
+          </span>
+        )}
       </div>
     </div>
   );

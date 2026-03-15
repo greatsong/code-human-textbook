@@ -221,10 +221,10 @@ function GroveConnector({
         </g>
       )}
 
-      {/* 연결된 센서 표시 — 여러 개일 때 (Y-스플리터) */}
+      {/* 연결된 센서 표시 — 여러 개일 때 (I2C Hub) */}
       {hasMultiple && (
         <g>
-          {/* Y-스플리터 시각화: 포트에서 분기하는 선 */}
+          {/* I2C Hub 시각화: 포트에서 분기하는 선 */}
           <line x1={x} y1={y + 16} x2={x} y2={y + 34} stroke={port.color} strokeWidth={1.5} opacity={0.5} />
 
           {sensorNames.map((name, i) => {
@@ -276,9 +276,9 @@ function GroveConnector({
             );
           })}
 
-          {/* Y-스플리터 아이콘 */}
-          <circle cx={x} cy={y + 34} r={4} fill="#1e293b" stroke={port.color} strokeWidth={1} />
-          <text x={x} y={y + 37} textAnchor="middle" fontSize={6} fill={port.color} fontWeight={700}>Y</text>
+          {/* I2C Hub 아이콘 */}
+          <rect x={x - 6} y={y + 30} width={12} height={8} rx={2} fill="#1e293b" stroke={port.color} strokeWidth={1} />
+          <text x={x} y={y + 37} textAnchor="middle" fontSize={5} fill={port.color} fontWeight={700}>Hub</text>
         </g>
       )}
     </g>
@@ -353,7 +353,7 @@ function Tooltip({
       {hasMultiple && (
         <g>
           <text x={tx + 12} y={ty + 72} fontSize={10} fill="#94a3b8" fontFamily="system-ui, sans-serif">
-            연결됨 (<tspan fill="#f59e0b">Y-스플리터 필요</tspan>):
+            연결됨 (<tspan fill="#f59e0b">I2C Hub 사용</tspan>):
           </text>
           {sensorNames.map((name, i) => (
             <g key={i}>
@@ -511,25 +511,25 @@ export default function GroveShieldMap({
           </span>
         ))}
 
-        {/* Y-스플리터 범례 — 여러 센서가 같은 포트에 연결된 경우에만 표시 */}
+        {/* I2C Hub 범례 — 여러 센서가 같은 포트에 연결된 경우에만 표시 */}
         {maxSensorsOnPort > 1 && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#f59e0b' }}>
             <span
               style={{
-                width: 14,
+                width: 18,
                 height: 14,
-                borderRadius: '50%',
+                borderRadius: 3,
                 border: '1.5px solid #f59e0b',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: 8,
+                fontSize: 7,
                 fontWeight: 700,
               }}
             >
-              Y
+              Hub
             </span>
-            Y-스플리터
+            I2C Hub
           </span>
         )}
       </div>

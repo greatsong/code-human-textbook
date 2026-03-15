@@ -4,6 +4,8 @@ description: "단일 센서 + OLED 대시보드 프로젝트 (3시간)"
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
+import GroveShieldMap from '../../../components/grove/GroveShieldMap';
+import VirtualWiring from '../../../components/grove/VirtualWiring';
 
 <p style="color: var(--sl-color-gray-3); margin-bottom: 0.25rem;">코스 B &gt; Lv.1</p>
 
@@ -49,6 +51,54 @@ DHT20(주소 0x38)과 OLED(주소 0x3C)은 모두 I2C 통신을 사용합니다.
 :::note[ADC 센서 포트]
 빛 센서는 **A0 포트(GP26)**, 소리 센서는 **A1 포트(GP27)**에 연결합니다. ADC 센서는 반드시 아날로그 포트(A0, A1)에 연결해야 합니다.
 :::
+
+### 보드 포트 맵
+
+선택한 센서에 따라 연결 위치가 달라집니다. 아래 보드에서 각 포트의 역할을 확인하세요.
+
+**프로젝트 1 (DHT20 온습도)** — DHT20과 OLED 모두 I2C1에 연결:
+
+<GroveShieldMap
+  client:load
+  connectedSensors={[
+    { port: 'I2C1', sensorName: 'DHT20+OLED' },
+  ]}
+/>
+
+**프로젝트 2 (소리 센서)** — 소리 센서는 A1, OLED는 I2C1:
+
+<GroveShieldMap
+  client:load
+  connectedSensors={[
+    { port: 'A1', sensorName: '소리 센서' },
+    { port: 'I2C1', sensorName: 'OLED' },
+  ]}
+/>
+
+**프로젝트 3 (빛 센서)** — 빛 센서는 A0, OLED는 I2C1:
+
+<GroveShieldMap
+  client:load
+  connectedSensors={[
+    { port: 'A0', sensorName: '빛 센서' },
+    { port: 'I2C1', sensorName: 'OLED' },
+  ]}
+/>
+
+### 연결 연습
+
+센서 카드를 클릭한 후, 보드의 올바른 포트를 클릭하여 연결해보세요.
+
+<VirtualWiring
+  client:load
+  title="Lv.1: 센서 연결 연습"
+  sensors={[
+    { id: 'dht20', name: 'DHT20 (온습도)', correctPort: 'I2C1', portType: 'I2C', hint: 'I2C 센서는 I2C1 포트에 연결합니다' },
+    { id: 'light', name: '빛 센서', correctPort: 'A0', portType: '아날로그', hint: '빛 센서는 A0 포트(GP26)에 연결합니다' },
+    { id: 'sound', name: '소리 센서', correctPort: 'A1', portType: '아날로그', hint: '소리 센서는 A1 포트(GP27)에 연결합니다' },
+    { id: 'oled', name: 'OLED 디스플레이', correctPort: 'I2C1', portType: 'I2C', hint: 'OLED는 I2C1 포트에 연결합니다 (DHT20과 주소가 달라 공존 가능)' },
+  ]}
+/>
 
 ---
 

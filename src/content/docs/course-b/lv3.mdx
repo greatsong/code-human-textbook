@@ -4,6 +4,8 @@ description: "가설 기반 + 장기 데이터 수집 + AI 분석 프로젝트 (
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
+import GroveShieldMap from '../../../components/grove/GroveShieldMap';
+import VirtualWiring from '../../../components/grove/VirtualWiring';
 
 <p style="color: var(--sl-color-gray-3); margin-bottom: 0.25rem;">코스 B &gt; Lv.3</p>
 
@@ -61,6 +63,56 @@ Pico에 아래 라이브러리가 필요합니다:
 3. 검색창에 `micropython-urequests` 입력 → 설치 (WiFi 통신에 필요)
 - Pico가 연결되어 있고, 인터프리터가 "MicroPython (Raspberry Pi Pico)"로 설정되어 있어야 합니다
 :::
+
+### 프로젝트별 보드 포트 맵
+
+연구 주제에 따라 센서 구성이 달라집니다. 자신의 프로젝트에 맞는 배선도를 확인하세요.
+
+**프로젝트 1 (식물 성장 환경)** — DHT20(I2C1) + 빛 센서(A0) + OLED(I2C1):
+
+<GroveShieldMap
+  client:load
+  connectedSensors={[
+    { port: 'I2C1', sensorName: 'DHT20+OLED' },
+    { port: 'A0', sensorName: '빛 센서' },
+  ]}
+/>
+
+**프로젝트 2 (공기질과 집중력)** — SCD41(I2C1) + OLED(I2C1):
+
+<GroveShieldMap
+  client:load
+  connectedSensors={[
+    { port: 'I2C1', sensorName: 'SCD41+OLED' },
+  ]}
+/>
+
+**프로젝트 3 (움직임과 자세)** — MPU6050(I2C1) + OLED(I2C1):
+
+<GroveShieldMap
+  client:load
+  connectedSensors={[
+    { port: 'I2C1', sensorName: 'MPU6050+OLED' },
+  ]}
+/>
+
+### 연결 연습
+
+Lv.3에서 사용하는 센서들을 올바른 포트에 연결해보세요.
+
+<VirtualWiring
+  client:load
+  title="Lv.3: 연구용 센서 연결 연습"
+  sensors={[
+    { id: 'dht20', name: 'DHT20 (온습도)', correctPort: 'I2C1', portType: 'I2C', hint: 'I2C 센서는 I2C1 포트에 연결합니다' },
+    { id: 'scd41', name: 'SCD41 (CO2)', correctPort: 'I2C1', portType: 'I2C', hint: 'SCD41은 I2C — 주소 0x62입니다' },
+    { id: 'mpu6050', name: 'MPU6050 (가속도)', correctPort: 'I2C1', portType: 'I2C', hint: 'MPU6050은 I2C — 주소 0x68입니다' },
+    { id: 'light', name: '빛 센서', correctPort: 'A0', portType: '아날로그', hint: '빛 센서는 A0 포트(GP26)에 연결합니다' },
+    { id: 'oled', name: 'OLED 디스플레이', correctPort: 'I2C1', portType: 'I2C', hint: 'OLED는 I2C1 포트에 연결합니다 (주소 0x3C)' },
+  ]}
+/>
+
+---
 
 ## 예시 프로젝트 3가지
 

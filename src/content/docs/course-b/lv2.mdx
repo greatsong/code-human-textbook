@@ -4,6 +4,8 @@ description: "복합 센서 + 스마트 시스템 프로젝트 (3시간). 바이
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
+import GroveShieldMap from '../../../components/grove/GroveShieldMap';
+import VirtualWiring from '../../../components/grove/VirtualWiring';
 
 <p style="color: var(--sl-color-gray-3); margin-bottom: 0.25rem;">코스 B &gt; Lv.2</p>
 
@@ -46,6 +48,59 @@ import { Tabs, TabItem } from '@astrojs/starlight/components';
 - **빛 센서**(A0=GP26)와 **소리 센서**(A1=GP27)는 각각 다른 ADC 포트를 사용합니다. 바꿔 꽂지 않도록 주의하세요.
 - **I2C 센서들**(DHT20, SCD41, OLED)은 모두 주소가 다르므로 같은 I2C 버스에서 공존 가능합니다.
 :::
+
+### 프로젝트별 보드 포트 맵
+
+프로젝트에 따라 센서 구성과 연결 위치가 달라집니다. 자신의 프로젝트에 맞는 배선도를 확인하세요.
+
+**프로젝트 1 (스마트 환기)** — DHT20 + SCD41 + OLED 모두 I2C1:
+
+<GroveShieldMap
+  client:load
+  connectedSensors={[
+    { port: 'I2C1', sensorName: 'DHT20+SCD41+OLED' },
+  ]}
+/>
+
+**프로젝트 2 (스마트 알림)** — 초음파(D16) + 소리(A1) + 부저(D18) + OLED(I2C1):
+
+<GroveShieldMap
+  client:load
+  connectedSensors={[
+    { port: 'D16', sensorName: '초음파' },
+    { port: 'A1', sensorName: '소리 센서' },
+    { port: 'D18', sensorName: '부저' },
+    { port: 'I2C1', sensorName: 'OLED' },
+  ]}
+/>
+
+**프로젝트 3 (스마트 교실)** — DHT20(I2C1) + 빛(A0) + 소리(A1) + OLED(I2C1):
+
+<GroveShieldMap
+  client:load
+  connectedSensors={[
+    { port: 'I2C1', sensorName: 'DHT20+OLED' },
+    { port: 'A0', sensorName: '빛 센서' },
+    { port: 'A1', sensorName: '소리 센서' },
+  ]}
+/>
+
+### 연결 연습
+
+Lv.2에서 사용하는 센서들을 올바른 포트에 연결해보세요.
+
+<VirtualWiring
+  client:load
+  title="Lv.2: 복합 센서 연결 연습"
+  sensors={[
+    { id: 'dht20', name: 'DHT20 (온습도)', correctPort: 'I2C1', portType: 'I2C', hint: 'I2C 센서는 I2C1 포트에 연결합니다' },
+    { id: 'scd41', name: 'SCD41 (CO2)', correctPort: 'I2C1', portType: 'I2C', hint: 'SCD41도 I2C — 주소 0x62로 DHT20(0x38)과 공존 가능' },
+    { id: 'ultrasonic', name: '초음파 센서', correctPort: 'D16', portType: '디지털', hint: '초음파 센서는 D16 포트(GP16+GP17)에 연결합니다' },
+    { id: 'sound', name: '소리 센서', correctPort: 'A1', portType: '아날로그', hint: '소리 센서는 A1 포트(GP27)에 연결합니다' },
+    { id: 'light', name: '빛 센서', correctPort: 'A0', portType: '아날로그', hint: '빛 센서는 A0 포트(GP26)에 연결합니다' },
+    { id: 'buzzer', name: '부저', correctPort: 'D18', portType: '디지털', hint: '초음파와 함께 쓸 때 부저는 D18(GP18)에 연결합니다' },
+  ]}
+/>
 
 ---
 

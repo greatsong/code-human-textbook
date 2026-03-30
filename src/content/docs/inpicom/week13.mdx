@@ -1,0 +1,465 @@
+---
+title: "13차시: 음성 제어 환경 모니터 – 음성인식 + BME280 + OLED"
+description: "음성 명령으로 환경 데이터 조회 화면을 전환하는 스마트 모니터를 구현합니다."
+---
+
+import Mermaid from '../../../components/Mermaid';
+
+<p style="color: var(--sl-color-gray-3); margin-bottom: 0.25rem;">인피컴 프로젝트 &gt; 심화 통합 프로젝트 &gt; 13차시</p>
+
+# 음성 제어 환경 모니터 – 음성인식 + BME280 + OLED
+
+## 기본 정보
+
+| 항목 | 내용 |
+|------|------|
+| 주제 | 음성 명령으로 환경 데이터 조회 화면을 전환하는 스마트 모니터 |
+| 시간 | 50분 (1교시) |
+| 형태 | 교사 시연 + 모둠 순환 체험 (부품 1세트) |
+| 준비물 | Pico 2 WH + Grove Shield, Grove Speech Recognizer, Grove BME280, Grove OLED 0.96", USB 케이블 |
+| 선수학습 | 4차시 (BME280/OLED), 6차시 (음성인식) |
+
+## 학습목표
+
+1. 음성 명령으로 화면 모드를 전환하는 UI 시스템을 설계할 수 있다
+2. UART(음성)와 I2C(센서+OLED)를 동시 운용할 수 있다
+3. 세 가지 통신 방식(ADC, I2C, UART)을 종합적으로 이해할 수 있다
+
+## 50분 타임라인
+
+```
+[도입: 5분]
+└─ 00-05분: "말로 조작하는 모니터"
+
+[실습 1: 15분] 3장치 통합 연결
+├─ 05-12분: UART + I2C 동시 연결 + 테스트
+└─ 12-20분: step1 – 음성 명령으로 콘솔 출력 전환
+
+[실습 2: 20분] 음성 OLED 모니터
+├─ 20-30분: step2 – 명령별 화면 모드 전환
+└─ 30-40분: step3 – 자동 갱신 + 상태바
+
+[정리: 10분]
+├─ 40-45분: 13차시 전체 여정 회고
+└─ 45-50분: 정리 + 최종 프로젝트 안내
+```
+
+---
+
+## 상세 수업 진행
+
+### 도입 (00-05분)
+
+**[강의 스크립트]**
+
+선생님: "지금까지 배운 모든 통신 방식을 합쳐봅시다!"
+
+<Mermaid client:load chart={`
+graph LR
+    subgraph 입력["입력 (UART)"]
+        VOICE["음성인식 센서<br/>Grove Speech Recognizer"]
+    end
+    subgraph 처리["처리"]
+        PICO["Pico 2 WH<br/>명령 해석 +<br/>데이터 읽기"]
+    end
+    subgraph 센서["센서 (I2C)"]
+        BME["BME280<br/>온도·습도·기압<br/>(0x76)"]
+    end
+    subgraph 출력["출력 (I2C)"]
+        OLED["OLED 0.96<br/>화면 표시<br/>(0x3C)"]
+    end
+    VOICE -->|UART<br/>GP0/GP1| PICO
+    BME -->|I2C<br/>GP8/GP9| PICO
+    PICO -->|I2C<br/>GP8/GP9| OLED
+    style VOICE fill:#e1f5fe,stroke:#0288d1
+    style PICO fill:#f3e5f5,stroke:#7b1fa2
+    style BME fill:#e8f5e9,stroke:#2e7d32
+    style OLED fill:#fff3e0,stroke:#ef6c00
+`} caption="3가지 통신 방식 통합 구조 — ADC/I2C/UART를 하나의 시스템에서 운용" />
+
+선생님: "'Temperature!'라고 말하면 온도 화면이 뜨고, 'Up!'하면 기압 화면으로 바뀌는 스마트 모니터를 만들 거예요. 리모컨 없는 TV인 셈이죠!"
+
+---
+
+### 실습 1: 3장치 통합 (05-20분)
+
+**[시각 자료: 연결도]**
+
+```
+Grove Shield
+
+  [UART]      [I2C-1]      [I2C-2]
+     ↑           ↑             ↑
+  ┌──┴──────┐ ┌──┴──────┐  ┌──┴──┐
+  │ Speech  │ │ BME280  │  │OLED │
+  │Recognizr│ │ (0x76)  │  │(0x3C)│
+  └─────────┘ └─────────┘  └─────┘
+
+  UART: GP0(TX), GP1(RX) → 음성 명령
+  I2C:  GP8(SDA), GP9(SCL) → 센서 + 디스플레이
+```
+
+**[코드: step1_voice_switch.py]**
+```python
+# === 음성 명령으로 데이터 전환 ===
+# 명령에 따라 표시할 데이터 변경
+
+from machine import UART, I2C, Pin
+import bme280
+import time
+
+uart = UART(0, baudrate=9600, tx=Pin(0), rx=Pin(1))
+i2c = I2C(0, sda=Pin(8), scl=Pin(9))
+bme = bme280.BME280(i2c=i2c)
+
+# --- 화면 모드 ---
+MODE_ALL  = 0   # 전체 표시
+MODE_TEMP = 1   # 온도 상세
+MODE_HUM  = 2   # 습도 상세
+MODE_PRES = 3   # 기압 상세
+
+current_mode = MODE_ALL
+
+# --- 명령 매핑 ---
+# Grove Speech Recognizer 기본 명령어 활용
+COMMAND_MAP = {
+    1: (MODE_ALL,  "전체 보기"),    # "Turn on the light"
+    2: (MODE_ALL,  "전체 보기"),    # "Turn off the light"
+    7: (None,      "다음 화면"),     # "Up" → 다음 모드
+    8: (None,      "이전 화면"),     # "Down" → 이전 모드
+}
+
+def next_mode():
+    global current_mode
+    current_mode = (current_mode + 1) % 4
+
+def prev_mode():
+    global current_mode
+    current_mode = (current_mode - 1) % 4
+
+# --- 메인 ---
+print("=== 음성 제어 모니터 ===")
+print("'Up' = 다음 화면, 'Down' = 이전 화면")
+
+mode_names = ["ALL", "TEMP", "HUMIDITY", "PRESSURE"]
+
+while True:
+    # 음성 명령 확인
+    if uart.any():
+        data = uart.read()
+        if data:
+            cmd = data[0]
+            if cmd == 7:
+                next_mode()
+                print(f"→ 다음: {mode_names[current_mode]}")
+            elif cmd == 8:
+                prev_mode()
+                print(f"← 이전: {mode_names[current_mode]}")
+            elif cmd in COMMAND_MAP:
+                mode, name = COMMAND_MAP[cmd]
+                if mode is not None:
+                    current_mode = mode
+                print(f"명령: {name}")
+
+    # 센서 데이터
+    temp = bme.values[0]
+    hum = bme.values[2]
+    pres = bme.values[1]
+
+    # 현재 모드에 따라 출력
+    if current_mode == MODE_ALL:
+        print(f"[ALL] T:{temp} H:{hum} P:{pres}")
+    elif current_mode == MODE_TEMP:
+        print(f"[TEMP] {temp} (상세)")
+    elif current_mode == MODE_HUM:
+        print(f"[HUM] {hum} (상세)")
+    elif current_mode == MODE_PRES:
+        print(f"[PRES] {pres} (상세)")
+
+    time.sleep(1)
+```
+
+---
+
+### 실습 2: 음성 OLED 모니터 (20-40분)
+
+<Mermaid client:load chart={`
+stateDiagram-v2
+    [*] --> Overview
+    Overview --> Temperature : "Up" 명령
+    Temperature --> Humidity : "Up" 명령
+    Humidity --> Pressure : "Up" 명령
+    Pressure --> Overview : "Up" 명령
+
+    Overview --> Pressure : "Down" 명령
+    Pressure --> Humidity : "Down" 명령
+    Humidity --> Temperature : "Down" 명령
+    Temperature --> Overview : "Down" 명령
+
+    Temperature --> Overview : "Turn on" 명령
+    Humidity --> Overview : "Turn on" 명령
+    Pressure --> Overview : "Turn on" 명령
+
+    state Overview {
+        [*] --> 전체요약표시
+        전체요약표시 : 온도·습도·기압\n한 화면에 표시
+    }
+    state Temperature {
+        [*] --> 온도상세
+        온도상세 : 막대 게이지\nCold/Cool/Comfort/Warm/Hot
+    }
+    state Humidity {
+        [*] --> 습도상세
+        습도상세 : 막대 게이지\nDry/Comfort/Humid
+    }
+    state Pressure {
+        [*] --> 기압상세
+        기압상세 : 날씨 추정 + 고도 계산
+    }
+`} caption="음성 명령에 따른 화면 전환 상태도 — Up/Down으로 순환, Turn on으로 홈 복귀" />
+
+**[코드: step2_voice_oled.py]**
+```python
+# === 음성 제어 OLED 모니터 ===
+# 음성 명령으로 화면 모드 전환 + 실시간 갱신
+
+from machine import UART, I2C, Pin
+import ssd1306
+import bme280
+import time
+import math
+
+uart = UART(0, baudrate=9600, tx=Pin(0), rx=Pin(1))
+i2c = I2C(0, sda=Pin(8), scl=Pin(9))
+bme = bme280.BME280(i2c=i2c)
+oled = ssd1306.SSD1306_I2C(128, 64, i2c)
+
+current_mode = 0  # 0=all, 1=temp, 2=hum, 3=pres
+mode_names = ["Overview", "Temperature", "Humidity", "Pressure"]
+
+# --- 화면 그리기 함수 ---
+def draw_overview(t, h, p):
+    """전체 요약 화면"""
+    oled.fill(0)
+    oled.text("= Overview =", 15, 0)
+    oled.hline(0, 10, 128, 1)
+    oled.text(f"Temp: {t}", 0, 16)
+    oled.text(f"Humi: {h}", 0, 30)
+    oled.text(f"Pres: {p}", 0, 44)
+    oled.text("Say 'Up'/'Down'", 0, 56)
+    oled.show()
+
+def draw_temp_detail(temp_c):
+    """온도 상세 화면 + 아날로그 게이지"""
+    oled.fill(0)
+    oled.text("= Temperature =", 5, 0)
+    oled.text(f"{temp_c:.1f} C", 35, 14)
+
+    # 상태 판정
+    if temp_c < 18:
+        status = "Cold!"
+    elif temp_c < 20:
+        status = "Cool"
+    elif temp_c <= 26:
+        status = "Comfort"
+    elif temp_c <= 28:
+        status = "Warm"
+    else:
+        status = "Hot!"
+    oled.text(status, 40, 28)
+
+    # 막대 게이지 (15~35도 범위)
+    bar_w = max(0, min(120, int((temp_c - 15) / 20 * 120)))
+    oled.rect(4, 44, 120, 12, 1)
+    oled.fill_rect(4, 44, bar_w, 12, 1)
+    oled.text("15", 0, 58)
+    oled.text("25", 55, 58)
+    oled.text("35", 110, 58)
+    oled.show()
+
+def draw_hum_detail(hum_pct):
+    """습도 상세 화면"""
+    oled.fill(0)
+    oled.text("= Humidity =", 15, 0)
+    oled.text(f"{hum_pct:.0f} %", 45, 14)
+
+    if hum_pct < 30:
+        status = "Too Dry!"
+    elif hum_pct < 40:
+        status = "Dry"
+    elif hum_pct <= 60:
+        status = "Comfort"
+    elif hum_pct <= 70:
+        status = "Humid"
+    else:
+        status = "Too Humid!"
+    oled.text(status, 35, 28)
+
+    bar_w = max(0, min(120, int(hum_pct / 100 * 120)))
+    oled.rect(4, 44, 120, 12, 1)
+    oled.fill_rect(4, 44, bar_w, 12, 1)
+    oled.text("0%", 0, 58)
+    oled.text("50%", 50, 58)
+    oled.text("100%", 96, 58)
+    oled.show()
+
+def draw_pres_detail(pres_hpa):
+    """기압 상세 화면"""
+    oled.fill(0)
+    oled.text("= Pressure =", 12, 0)
+    oled.text(f"{pres_hpa:.1f} hPa", 15, 14)
+
+    # 기압으로 날씨 추정
+    if pres_hpa > 1020:
+        weather = "High P - Clear"
+    elif pres_hpa > 1010:
+        weather = "Normal"
+    elif pres_hpa > 1000:
+        weather = "Low P - Cloudy?"
+    else:
+        weather = "Storm coming?"
+    oled.text(weather, 0, 30)
+
+    # 고도 추정
+    alt = 44330 * (1 - (pres_hpa / 1013.25) ** 0.1903)
+    oled.text(f"Est.Alt: {alt:.0f}m", 0, 46)
+    oled.show()
+
+# --- 메인 루프 ---
+print("=== 음성 제어 환경 모니터 ===")
+
+while True:
+    # 음성 명령 확인
+    if uart.any():
+        data = uart.read()
+        if data:
+            cmd = data[0]
+            if cmd == 7:  # "Up"
+                current_mode = (current_mode + 1) % 4
+                print(f"→ {mode_names[current_mode]}")
+            elif cmd == 8:  # "Down"
+                current_mode = (current_mode - 1) % 4
+                print(f"← {mode_names[current_mode]}")
+            elif cmd == 1:  # "Turn on" → Overview
+                current_mode = 0
+
+    # 센서 읽기
+    temp_s = bme.values[0]
+    hum_s = bme.values[2]
+    pres_s = bme.values[1]
+    temp_c = float(temp_s[:-1])
+    hum_f = float(hum_s[:-1])
+    pres_f = float(pres_s[:-3])
+
+    # 현재 모드에 따라 화면 그리기
+    if current_mode == 0:
+        draw_overview(temp_s, hum_s, pres_s)
+    elif current_mode == 1:
+        draw_temp_detail(temp_c)
+    elif current_mode == 2:
+        draw_hum_detail(hum_f)
+    elif current_mode == 3:
+        draw_pres_detail(pres_f)
+
+    time.sleep(1)
+```
+
+**[시각 자료: 4가지 화면 모드]**
+
+```
+[Mode 0: Overview]        [Mode 1: Temperature]
+┌──────────────────┐     ┌──────────────────┐
+│  = Overview =    │     │  = Temperature = │
+│  Temp: 23.4C     │     │    23.4 C        │
+│  Humi: 52%       │     │    Comfort       │
+│  Pres: 1013hPa   │     │  [████████░░░░]  │
+│  Say 'Up'/'Down' │     │  15    25    35  │
+└──────────────────┘     └──────────────────┘
+
+[Mode 2: Humidity]        [Mode 3: Pressure]
+┌──────────────────┐     ┌──────────────────┐
+│  = Humidity =    │     │  = Pressure =    │
+│     52 %         │     │  1013.2 hPa      │
+│    Comfort       │     │  Normal          │
+│  [██████░░░░░░]  │     │  Est.Alt: 5m     │
+│  0%   50%  100%  │     │                  │
+└──────────────────┘     └──────────────────┘
+```
+
+**[수업 장면]**
+
+선생님이 "Up!"이라고 말하자 화면이 Overview에서 Temperature로 전환된다.
+선생님: "다시 Up!"
+(Temperature에서 Humidity로 전환)
+학생: "진짜 말로 바뀌네요!"
+선생님: "이게 '음성 인터페이스'예요. 버튼 없이, 손 안 쓰고 조작하는 거죠. 요리 중에 레시피 보거나, 운전 중에 네비 조작할 때 유용한 기술이에요."
+
+**[예상 Q&A]**
+
+:::note[Q: "화면 전환이 느릴 때가 있어요"]
+음성 인식 -> UART 전송 -> 명령 처리 -> OLED 갱신까지 시간이 걸려요. 또 메인 루프의 `sleep(1)` 때문에 최대 1초 딜레이가 있을 수 있어요.
+:::
+
+:::note[Q: "더 많은 화면을 추가하고 싶어요"]
+mode를 추가하고 draw 함수를 새로 만들면 돼요. 예를 들어 mode 4에 시계, mode 5에 그래프를 넣을 수 있어요.
+:::
+
+---
+
+### 정리 (40-50분)
+
+#### 13차시 전체 여정 회고
+
+**[강의 스크립트]**
+
+선생님: "1차시부터 오늘까지 우리가 여정을 돌아봅시다."
+
+<Mermaid client:load chart={`
+graph TB
+    subgraph 기초["기초 3차시"]
+        W1["1차시<br/>센서로 읽기<br/>(MQ2, ADC)"]
+        W2["2차시<br/>빛으로 쓰기<br/>(LED, NeoPixel)"]
+        W3["3차시<br/>입력+출력 통합<br/>(전자담배 검출기)"]
+    end
+    subgraph 확장["확장 프로젝트 10차시"]
+        W4["4차시: I2C + OLED<br/>(기상 스테이션)"]
+        W5["5차시: PIR + LED Strip<br/>(스마트 조명)"]
+        W6["6차시: UART + 음성인식<br/>(무드등)"]
+        W7["7차시: SCD30 + CO2<br/>(환기 알리미)"]
+        W8["8차시: 상태 머신<br/>(절전형 경보기)"]
+        W9["9차시: 데이터 매핑<br/>(온도 시각화)"]
+        W10["10차시: 과학 공식 활용<br/>(고도 측정)"]
+        W11["11차시: 센서 퓨전<br/>(환경 대시보드)"]
+        W12["12차시: 이중 검증<br/>(검출기 풀버전)"]
+        W13["13차시: 음성 UI<br/>(환경 모니터) ★오늘"]
+    end
+    W1 --> W2 --> W3
+    W3 --> W4
+    W4 --> W5 --> W6 --> W7
+    W7 --> W8 --> W9 --> W10
+    W10 --> W11 --> W12 --> W13
+    style W1 fill:#e3f2fd
+    style W2 fill:#e3f2fd
+    style W3 fill:#e3f2fd
+    style W13 fill:#ffeb3b,stroke:#f57f17,stroke-width:3px
+`} caption="13차시 전체 여정 로드맵 — 기초에서 심화 통합까지의 성장 과정" />
+
+```
+배운 통신: ADC, I2C, UART (NeoPixel은 1-Wire)
+배운 센서: MQ2, BME280, SCD30, PIR, 음성인식
+배운 출력: RGB LED Stick, LED Strip, OLED
+배운 개념: 임계값, 이동평균, 상태머신, 매핑, 센서퓨전, 보정
+```
+
+:::tip[핵심 정리]
+13차시 동안 센서 5종, 출력 3종, 통신 3종을 다뤘습니다. 그리고 무엇보다 **'문제를 정의하고 -> 센서를 선택하고 -> 코드로 해결하는'** 과정을 반복했어요. 이 과정이 진짜 엔지니어가 하는 일입니다.
+:::
+
+---
+
+## 코드 파일 목록
+
+| 파일명 | 설명 | 난이도 |
+|--------|------|--------|
+| `step1_voice_switch.py` | 음성 명령 기반 콘솔 전환 | ★★☆ |
+| `step2_voice_oled.py` | 4가지 상세 화면 + 음성 전환 | ★★★ |

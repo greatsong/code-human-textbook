@@ -83,6 +83,39 @@ export default defineConfig({
           ],
         },
         {
+          label: '인피컴 프로젝트 수업',
+          items: [
+            {
+              label: '센서와 출력 기초',
+              items: [
+                { label: '1차시: MQ2 가스 센서', slug: 'inpicom/week01' },
+                { label: '2차시: RGB LED Stick', slug: 'inpicom/week02' },
+                { label: '3차시: 전자담배 검출기', slug: 'inpicom/week03' },
+                { label: '4차시: 미니 기상 스테이션', slug: 'inpicom/week04' },
+              ],
+            },
+            {
+              label: '센서 조합과 시스템',
+              items: [
+                { label: '5차시: 스마트 복도 조명', slug: 'inpicom/week05' },
+                { label: '6차시: 음성 제어 무드등', slug: 'inpicom/week06' },
+                { label: '7차시: CO2 환기 알리미', slug: 'inpicom/week07' },
+                { label: '8차시: 절전형 가스 경보기', slug: 'inpicom/week08' },
+              ],
+            },
+            {
+              label: '심화 통합 프로젝트',
+              items: [
+                { label: '9차시: 온도 시각화 조명', slug: 'inpicom/week09' },
+                { label: '10차시: 고도 측정기', slug: 'inpicom/week10' },
+                { label: '11차시: 교실 환경 대시보드', slug: 'inpicom/week11' },
+                { label: '12차시: 전자담배 검출 풀버전', slug: 'inpicom/week12' },
+                { label: '13차시: 음성 제어 모니터', slug: 'inpicom/week13' },
+              ],
+            },
+          ],
+        },
+        {
           label: '부록',
           items: [
             { label: '센서 도감', slug: 'appendix/sensor-catalog' },
@@ -90,6 +123,12 @@ export default defineConfig({
             { label: '트러블슈팅', slug: 'appendix/troubleshooting' },
             { label: '용어 사전', slug: 'appendix/glossary' },
           ],
+        },
+      ],
+      head: [
+        {
+          tag: 'script',
+          attrs: { src: '/ai-physical-computing/scripts/image-zoom.js', defer: true },
         },
       ],
       customCss: ['./src/styles/custom.css'],

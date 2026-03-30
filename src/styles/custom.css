@@ -1162,3 +1162,173 @@
     padding: 0.5rem;
   }
 }
+
+/* ========================================
+   이미지 & 머메이드 확대 (Lightbox/Zoom)
+   ======================================== */
+
+/* 줌 오버레이 */
+.zoom-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(4px);
+  cursor: zoom-out;
+  animation: zoom-fade-in 0.15s ease-out;
+}
+
+@keyframes zoom-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.zoom-content {
+  position: relative;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow: auto;
+  border-radius: 12px;
+  background: var(--sl-color-bg, #fff);
+  padding: 1.5rem;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+
+.zoom-content img,
+.zoom-content svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.zoom-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 2.25rem;
+  height: 2.25rem;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: background 0.2s;
+}
+
+.zoom-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.zoom-hint {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+
+/* 머메이드 컨테이너 */
+.mermaid-figure {
+  position: relative;
+  margin: 1.5rem 0;
+}
+
+.mermaid-container {
+  display: flex;
+  justify-content: center;
+  padding: 1.25rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.75rem;
+  background: var(--sl-color-bg);
+  cursor: zoom-in;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  overflow-x: auto;
+}
+
+.mermaid-container:hover {
+  border-color: var(--sl-color-accent);
+  box-shadow: 0 0 0 2px var(--sl-color-accent-low);
+}
+
+.mermaid-container svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-caption {
+  text-align: center;
+  color: var(--sl-color-gray-3);
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.mermaid-zoom-hint {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--sl-color-gray-4);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.mermaid-figure:hover .mermaid-zoom-hint {
+  opacity: 1;
+}
+
+.mermaid-zoom-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 60vw;
+  padding: 2rem;
+}
+
+.mermaid-zoom-content svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 머메이드 로딩/에러 */
+.mermaid-loading {
+  display: flex;
+  justify-content: center;
+  padding: 2rem;
+  color: var(--sl-color-gray-3);
+  font-size: 0.9rem;
+}
+
+.mermaid-error {
+  border: 1px solid #ff6b6b;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
+  background: rgba(255, 107, 107, 0.05);
+}
+
+.mermaid-error p {
+  color: #ff6b6b;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+/* 콘텐츠 이미지 줌 힌트 */
+.sl-markdown-content img:not(.no-zoom) {
+  cursor: zoom-in;
+  border-radius: 0.5rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}

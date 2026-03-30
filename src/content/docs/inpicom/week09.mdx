@@ -1,0 +1,306 @@
+---
+title: "9차시: 온도 시각화 조명 - BME280 + LED Strip 1m"
+description: "온도에 따라 LED Strip 색상이 변하는 인터랙티브 조명을 만들며 데이터-색상 매핑 개념을 학습합니다."
+---
+
+import Mermaid from '../../../components/Mermaid';
+
+<p style="color: var(--sl-color-gray-3); margin-bottom: 0.25rem;">인피컴 프로젝트 &gt; 심화 통합 프로젝트 &gt; 9차시</p>
+
+# 온도 시각화 조명 -- BME280 + LED Strip 1m
+
+> **오늘의 질문:** "숫자 대신 색깔로 온도를 표현할 수 있을까?"
+
+<p style="color: var(--sl-color-gray-3);">
+50분 | 교사 시연 + 모둠 순환 체험 (부품 1세트) | 난이도 ●●○○○
+</p>
+
+---
+
+## 기본 정보
+
+| 항목 | 내용 |
+|------|------|
+| 주제 | 온도에 따라 LED Strip 색상이 변하는 인터랙티브 조명 |
+| 시간 | 50분 (1교시) |
+| 형태 | 교사 시연 + 모둠 순환 체험 (부품 1세트) |
+| 준비물 | Pico 2 WH + Grove Shield, Grove BME280, Grove WS2813 LED Strip 1m (60 LED), USB 케이블 |
+| 선수학습 | 2차시 (NeoPixel), 4차시 (BME280/I2C) |
+
+## 학습목표
+
+1. 수치 데이터를 색상으로 변환하는 '매핑' 개념을 이해할 수 있다
+2. map 함수를 사용하여 값의 범위를 변환할 수 있다
+3. 60개 LED를 활용한 대형 시각화 출력을 구현할 수 있다
+
+---
+
+## 50분 타임라인
+
+```
+[도입: 5분]
+└─ 00-05분: "데이터를 색으로 느끼기"
+
+[실습 1: 15분] 온도→색상 매핑
+├─ 05-15분: step1 – map 함수 + 단색 온도계
+└─ 15-20분: step2 – 온도에 따른 파랑↔빨강 그라데이션
+
+[실습 2: 20분] 인터랙티브 조명
+├─ 20-30분: step3 – 60 LED 막대 온도계
+└─ 30-40분: step4 – 온도 변화 반응형 웨이브
+
+[정리: 10분]
+├─ 40-45분: 체온 실험 + 데이터 시각화 토의
+└─ 45-50분: 정리
+```
+
+---
+
+## 상세 수업 진행
+
+### 도입 (00-05분)
+
+**[강의 스크립트]**
+
+선생님: "기상청 일기예보 지도 본 적 있죠? 파란색은 추운 곳, 빨간색은 더운 곳. 숫자 대신 색깔로 보면 한눈에 들어오잖아요."
+
+선생님: "오늘은 1m짜리 LED 60개를 온도계로 만들 거예요. 추우면 파랑, 더우면 빨강, 그 사이는 그라데이션으로. 숫자를 '느낄 수 있는' 조명이 되는 거예요."
+
+---
+
+### 실습 1: 온도 -> 색상 매핑 (05-20분)
+
+#### map 함수 이해 (05-15분)
+
+<Mermaid client:load chart={`
+graph LR
+    A["15°C<br/>파랑 (0,0,255)"] --> M["map_value( )<br/>비례 변환"]
+    B["25°C<br/>초록 (0,255,0)"] --> M
+    C["35°C<br/>빨강 (255,0,0)"] --> M
+    M --> D["RGB 색상값"]
+    style M fill:#f9f,stroke:#333,color:#000
+    style A fill:#33f,stroke:#333,color:#fff
+    style B fill:#0c0,stroke:#333,color:#fff
+    style C fill:#f33,stroke:#333,color:#fff
+`} caption="온도 → 색상 매핑 프로세스: 입력 범위(15~35°C)를 출력 범위(RGB)로 비례 변환" />
+
+**[시각 자료]**
+
+```
+매핑(mapping)이란?
+
+  입력 범위           출력 범위
+  15°C ─────→ 파랑 (0, 0, 255)
+  20°C ─────→ 청록 (0, 255, 255)
+  25°C ─────→ 초록 (0, 255, 0)
+  30°C ─────→ 노랑 (255, 255, 0)
+  35°C ─────→ 빨강 (255, 0, 0)
+
+  "A 범위의 값을 B 범위의 값으로 비례 변환"
+```
+
+<Mermaid client:load chart={`
+graph TD
+    subgraph map_value 함수
+        IN["입력값 (value)"] --> CLAMP["범위 제한<br/>min/max 클램핑"]
+        CLAMP --> CALC["비례 계산<br/>(value - in_min) * (out_max - out_min)<br/>/ (in_max - in_min) + out_min"]
+        CALC --> OUT["출력값 (정수)"]
+    end
+    subgraph 예시
+        EX1["map_value(25, 15, 35, 0, 255)"] --> RES1["= 127"]
+        EX2["map_value(15, 15, 35, 0, 255)"] --> RES2["= 0"]
+        EX3["map_value(35, 15, 35, 0, 255)"] --> RES3["= 255"]
+    end
+`} caption="map_value 함수 개념도: 값의 범위를 변환하는 핵심 함수" />
+
+**[코드: step1_mapping.py]**
+```python
+# === 온도 → 색상 매핑 기초 ===
+# map 함수로 값의 범위를 변환하기
+
+from machine import I2C, Pin
+from neopixel import NeoPixel
+import bme280
+import time
+
+# --- 하드웨어 ---
+i2c = I2C(0, sda=Pin(8), scl=Pin(9))
+bme = bme280.BME280(i2c=i2c)
+NUM_LEDS = 60
+np = NeoPixel(Pin(16), NUM_LEDS)
+
+# --- 핵심 함수: 값 범위 변환 ---
+def map_value(value, in_min, in_max, out_min, out_max):
+    """값을 한 범위에서 다른 범위로 변환
+    예: map_value(25, 15, 35, 0, 255) → 127
+    (15~35 범위의 25를 0~255 범위로 변환)"""
+    value = max(in_min, min(in_max, value))  # 범위 제한
+    return int((value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
+
+# --- 온도 → RGB 색상 변환 ---
+def temp_to_color(temp_c):
+    """온도를 파랑(추움)→빨강(더움)으로 변환
+    15°C = 순수 파랑, 25°C = 초록, 35°C = 순수 빨강"""
+    if temp_c <= 25:
+        # 15~25°C: 파랑 → 초록
+        r = 0
+        g = map_value(temp_c, 15, 25, 0, 255)
+        b = map_value(temp_c, 15, 25, 255, 0)
+    else:
+        # 25~35°C: 초록 → 빨강
+        r = map_value(temp_c, 25, 35, 0, 255)
+        g = map_value(temp_c, 25, 35, 255, 0)
+        b = 0
+    return (r, g, b)
+
+# --- 전체 LED를 온도 색으로 ---
+def set_all(color):
+    for i in range(NUM_LEDS):
+        np[i] = color
+    np.write()
+
+# --- 메인 루프 ---
+print("=== 온도 시각화 조명 ===")
+
+while True:
+    temp_str = bme.values[0]       # "23.45C"
+    temp_c = float(temp_str[:-1])  # 숫자만 추출
+
+    color = temp_to_color(temp_c)
+    set_all(color)
+
+    print(f"온도: {temp_c:.1f}°C → RGB{color}")
+    time.sleep(1)
+```
+
+선생님: "map_value 함수가 핵심이에요. 온도 15~35를 색상 0~255로 '비례 변환'하는 거예요. 이 함수는 앞으로 계속 쓸 거니까 잘 기억해두세요!"
+
+#### 60 LED 막대 온도계 (15-30분)
+
+**[코드: step2_bar_thermometer.py]**
+```python
+# === 60 LED 막대 온도계 ===
+# 온도에 비례하여 LED가 채워지는 막대 그래프
+
+from machine import I2C, Pin
+from neopixel import NeoPixel
+import bme280
+import time
+
+i2c = I2C(0, sda=Pin(8), scl=Pin(9))
+bme = bme280.BME280(i2c=i2c)
+NUM_LEDS = 60
+np = NeoPixel(Pin(16), NUM_LEDS)
+
+TEMP_MIN = 15.0  # 최소 표시 온도
+TEMP_MAX = 35.0  # 최대 표시 온도
+
+def map_value(value, in_min, in_max, out_min, out_max):
+    value = max(in_min, min(in_max, value))
+    return int((value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
+
+def update_bar(temp_c):
+    """온도에 따라 LED 막대 그래프 표시"""
+    # 온도 → 켜야 할 LED 개수
+    num_on = map_value(temp_c, TEMP_MIN, TEMP_MAX, 0, NUM_LEDS)
+
+    for i in range(NUM_LEDS):
+        if i < num_on:
+            # 위치에 따라 파랑→초록→빨강 그라데이션
+            ratio = i / NUM_LEDS
+            if ratio < 0.5:
+                r = 0
+                g = int(255 * ratio * 2)
+                b = int(255 * (1 - ratio * 2))
+            else:
+                r = int(255 * (ratio - 0.5) * 2)
+                g = int(255 * (1 - (ratio - 0.5) * 2))
+                b = 0
+            np[i] = (r, g, b)
+        else:
+            np[i] = (0, 0, 0)  # 나머지는 끔
+    np.write()
+
+# --- 메인 ---
+print("=== LED 막대 온도계 ===")
+
+while True:
+    temp_str = bme.values[0]
+    temp_c = float(temp_str[:-1])
+
+    update_bar(temp_c)
+    print(f"{temp_c:.1f}°C → LED {map_value(temp_c, TEMP_MIN, TEMP_MAX, 0, NUM_LEDS)}개 점등")
+    time.sleep(0.5)
+```
+
+**[시각 자료: LED 막대 온도계]**
+
+```
+15°C: ______________________________________________________ (거의 안 켜짐)
+20°C: ██████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ (15개 점등)
+25°C: ████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░ (30개 점등)
+30°C: ██████████████████████████████████████████████░░░░░░░░░░ (45개 점등)
+35°C: ████████████████████████████████████████████████████████ (60개 전부 점등)
+
+      파랑 ← ─ ─ ─ 초록 ─ ─ ─ → 빨강
+```
+
+<Mermaid client:load chart={`
+graph LR
+    A["BME280<br/>온도 센서"] -->|I2C| B["Pico 2 WH"]
+    B -->|"map_value( )"| C["온도 → LED 개수"]
+    B -->|"ratio 계산"| D["위치 → RGB 색상"]
+    C --> E["WS2813 LED Strip<br/>60 LED"]
+    D --> E
+    style A fill:#4682b4,stroke:#333,color:#fff
+    style B fill:#2e8b57,stroke:#333,color:#fff
+    style E fill:#ff6347,stroke:#333,color:#fff
+`} caption="LED 데이터 파이프라인: 센서에서 시각 출력까지의 데이터 흐름" />
+
+**[수업 장면]**
+
+선생님이 센서에 손가락을 대자 온도가 오르고 LED 막대가 늘어난다.
+학생: "손가락 온도도 감지하네요!"
+선생님: "손을 떼면?"
+(막대가 서서히 줄어듦)
+선생님: "60개 LED가 동시에 움직이니까 10개짜리 LED Stick과는 스케일이 다르죠? 하지만 코드 원리는 2차시에서 배운 것과 같아요."
+
+**[예상 Q&A]**
+
+:::tip[float(temp_str[:-1])이 뭔 뜻이에요?]
+`bme.values[0]`이 `'23.45C'`처럼 문자열로 오거든요. `[:-1]`로 마지막 글자(C)를 빼고, `float()`로 숫자로 바꾸는 거예요.
+:::
+
+:::note[ratio가 0.5 기준인 이유]
+LED의 절반(30개)까지는 파랑->초록, 나머지 절반은 초록->빨강으로 나눈 거예요. 중간이 초록(25°C)이 되도록요.
+:::
+
+---
+
+### 정리 (40-50분)
+
+```
+데이터 시각화의 핵심: 매핑(mapping)
+
+  센서 데이터 ──→ [map 함수] ──→ 시각적 표현
+
+  온도 → 색상 (오늘)
+  CO2  → LED 개수 (7차시 bar)
+  가스 → 깜빡임 속도 (3차시)
+  소리 → 밝기 (응용 가능)
+
+  같은 원리, 다른 매핑 = 다른 작품!
+```
+
+:::caution[정리 핵심]
+**매핑(mapping)** 은 데이터 시각화의 가장 기본적인 개념입니다. 센서 데이터를 색상, 크기, 위치, 속도 등 다양한 시각적 요소로 변환할 수 있으며, `map_value` 함수는 이후 차시에서도 계속 사용됩니다.
+:::
+
+---
+
+## 코드 파일 목록
+
+| 파일명 | 설명 | 난이도 |
+|--------|------|--------|
+| `step1_mapping.py` | map 함수 + 전체 색상 변환 | ★★☆ |
+| `step2_bar_thermometer.py` | 60 LED 막대 온도계 | ★★☆ |

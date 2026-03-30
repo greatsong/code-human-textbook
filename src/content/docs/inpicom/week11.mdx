@@ -1,0 +1,357 @@
+---
+title: "11차시: 교실 환경 대시보드 - BME280 + SCD30 + OLED"
+description: "다중 센서 데이터를 통합 표시하는 환경 모니터를 만들며, I2C 다중 장치 운용과 센서 퓨전을 학습합니다."
+---
+
+import Mermaid from '../../../components/Mermaid';
+
+<p style="color: var(--sl-color-gray-3); margin-bottom: 0.25rem;">인피컴 프로젝트 &gt; 심화 통합 프로젝트 &gt; 11차시</p>
+
+# 교실 환경 대시보드 -- BME280 + SCD30 + OLED
+
+> **오늘의 질문:** "하나의 화면에 여섯 가지 데이터를 어떻게 보여줄까?"
+
+<p style="color: var(--sl-color-gray-3);">
+50분 | 교사 시연 + 모둠 순환 체험 (부품 1세트) | 난이도 ●●●●○
+</p>
+
+---
+
+## 기본 정보
+
+| 항목 | 내용 |
+|------|------|
+| 주제 | 다중 센서 데이터를 통합 표시하는 환경 모니터 |
+| 시간 | 50분 (1교시) |
+| 형태 | 교사 시연 + 모둠 순환 체험 (부품 1세트) |
+| 준비물 | Pico 2 WH + Grove Shield, Grove BME280, Grove SCD30, Grove OLED 0.96", USB 케이블 |
+| 선수학습 | 4차시 (BME280/OLED), 7차시 (SCD30) |
+
+## 학습목표
+
+1. 같은 I2C 버스에 3개 장치를 연결하여 통합 운용할 수 있다
+2. 여러 센서 데이터를 하나의 화면에 효과적으로 배치할 수 있다
+3. 데이터 기반으로 환경 상태를 종합 판정하는 로직을 설계할 수 있다
+
+---
+
+## 50분 타임라인
+
+```
+[도입: 5분]
+└─ 00-05분: "하나의 화면, 여섯 가지 데이터"
+
+[실습 1: 15분] 3장치 I2C 통합
+├─ 05-10분: 연결 + I2C 스캔 확인
+└─ 10-20분: step1 – 6개 데이터 동시 읽기
+
+[실습 2: 20분] 대시보드 UI 설계
+├─ 20-30분: step2 – OLED 레이아웃 디자인
+└─ 30-40분: step3 – 종합 판정 + 상태 아이콘
+
+[정리: 10분]
+├─ 40-45분: 실시간 모니터링 체험
+└─ 45-50분: 정리 + IoT 확장 토의
+```
+
+---
+
+## 상세 수업 진행
+
+### 도입 (00-05분)
+
+**[강의 스크립트]**
+
+선생님: "지금까지 센서 하나씩 배웠죠? 오늘은 전부 합칩니다!"
+
+```
+BME280: 온도, 습도, 기압 (3개)
+SCD30:  CO2, 온도, 습도  (3개)
+──────────────────────────
+합계: 6개 데이터!
+
+하지만 온도·습도는 겹치니까?
+→ 교차 검증에 사용! (두 센서가 비슷한 값이면 신뢰도 ↑)
+```
+
+선생님: "실제 IoT 시스템은 이렇게 여러 센서를 조합해요. 구글 네스트, 에어비앤비 에어모니터 다 비슷한 구조예요."
+
+---
+
+### 실습 1: 3장치 I2C 통합 (05-20분)
+
+<Mermaid client:load chart={`
+graph TD
+    subgraph "I2C 버스 (SDA/SCL 공유)"
+        PICO["Pico 2 WH<br/>Grove Shield"]
+        BME["BME280<br/>주소: 0x76<br/>온도/습도/기압"]
+        SCD["SCD30<br/>주소: 0x61<br/>CO2/온도/습도"]
+        OLED["OLED 0.96인치<br/>주소: 0x3C<br/>화면 출력"]
+    end
+    PICO -->|"I2C-1"| BME
+    PICO -->|"I2C-2"| SCD
+    PICO -->|"I2C-3"| OLED
+    style PICO fill:#2e8b57,stroke:#333,color:#fff
+    style BME fill:#4682b4,stroke:#333,color:#fff
+    style SCD fill:#daa520,stroke:#333,color:#000
+    style OLED fill:#8a2be2,stroke:#333,color:#fff
+`} caption="다중 I2C 장치 구조: 주소가 다르면 같은 SDA/SCL 선으로 N개 장치 연결 가능" />
+
+**[시각 자료: 연결도]**
+
+```
+Grove Shield – I2C 포트 3개 모두 사용!
+
+  [I2C-1]     [I2C-2]     [I2C-3]
+     ↑           ↑           ↑
+  ┌──┴──┐    ┌──┴──┐    ┌──┴──┐
+  │BME280│    │SCD30│    │OLED │
+  │0x76  │    │0x61 │    │0x3C │
+  └──────┘    └─────┘    └─────┘
+
+  모두 같은 SDA/SCL 선 공유!
+  주소가 다르니까 충돌 없음
+```
+
+**[코드: step1_multi_sensor.py]**
+```python
+# === 다중 센서 읽기 ===
+# BME280 + SCD30 동시 데이터 수집
+
+from machine import I2C, Pin
+import bme280
+import scd30
+import time
+
+i2c = I2C(0, sda=Pin(8), scl=Pin(9))
+
+# --- I2C 스캔 ---
+devices = i2c.scan()
+print("I2C 장치:", [hex(d) for d in devices])
+# 정상: [0x3c, 0x61, 0x76] 또는 [0x3c, 0x61, 0x77]
+
+# --- 센서 초기화 ---
+bme = bme280.BME280(i2c=i2c)
+co2_sensor = scd30.SCD30(i2c, addr=0x61)
+co2_sensor.start_continous_measurement()
+
+print("=== 다중 센서 시작 ===")
+time.sleep(2)  # SCD30 안정화
+
+while True:
+    # BME280 데이터
+    bme_temp = bme.values[0]      # "23.4C"
+    bme_hum = bme.values[2]       # "45.2%"
+    bme_pres = bme.values[1]      # "1013.2hPa"
+
+    # SCD30 데이터
+    if co2_sensor.data_ready():
+        co2, scd_temp, scd_hum = co2_sensor.read_measurement()
+
+        print(f"[BME280] T:{bme_temp} H:{bme_hum} P:{bme_pres}")
+        print(f"[SCD30]  CO2:{co2:.0f}ppm T:{scd_temp:.1f}C H:{scd_hum:.1f}%")
+        print(f"[교차검증] 온도차: {abs(float(bme_temp[:-1])-scd_temp):.1f}C")
+        print("---")
+
+    time.sleep(2)
+```
+
+선생님: "두 센서의 온도 차이가 1-2도 이내면 정상이에요. 차이가 크면 센서 중 하나에 문제가 있거나, 위치가 달라서 그래요."
+
+---
+
+### 실습 2: 대시보드 UI 설계 (20-40분)
+
+#### OLED 레이아웃 (20-30분)
+
+<Mermaid client:load chart={`
+graph TD
+    subgraph "데이터 통합 판정 로직"
+        CO2["CO2 값"] --> CO2S["CO2 점수<br/>(40점 만점)"]
+        TEMP["평균 온도<br/>(BME+SCD)/2"] --> TEMPS["온도 점수<br/>(30점 만점)"]
+        HUM["평균 습도<br/>(BME+SCD)/2"] --> HUMS["습도 점수<br/>(30점 만점)"]
+        CO2S --> TOTAL["총점<br/>(100점 만점)"]
+        TEMPS --> TOTAL
+        HUMS --> TOTAL
+        TOTAL --> G1["80+ → Excellent!"]
+        TOTAL --> G2["60+ → Good"]
+        TOTAL --> G3["40+ → Fair"]
+        TOTAL --> G4["40 미만 → Poor"]
+    end
+    style CO2S fill:#ff6347,stroke:#333,color:#fff
+    style TEMPS fill:#4682b4,stroke:#333,color:#fff
+    style HUMS fill:#2e8b57,stroke:#333,color:#fff
+    style TOTAL fill:#daa520,stroke:#333,color:#000
+`} caption="데이터 통합 판정 로직: CO2(40점) + 온도(30점) + 습도(30점) = 종합 점수" />
+
+**[코드: step2_dashboard_ui.py]**
+```python
+# === 환경 대시보드 UI ===
+# OLED 128x64에 모든 데이터를 보기 좋게 배치
+
+from machine import I2C, Pin
+import ssd1306
+import bme280
+import scd30
+import time
+
+i2c = I2C(0, sda=Pin(8), scl=Pin(9))
+bme = bme280.BME280(i2c=i2c)
+co2_s = scd30.SCD30(i2c, addr=0x61)
+co2_s.start_continous_measurement()
+oled = ssd1306.SSD1306_I2C(128, 64, i2c)
+
+time.sleep(2)
+
+# --- 환경 판정 ---
+def judge_environment(co2, temp, hum):
+    """6개 데이터로 종합 판정"""
+    score = 0  # 0=최악, 100=최상
+
+    # CO2 점수 (40점 만점)
+    if co2 < 800:
+        score += 40
+    elif co2 < 1000:
+        score += 30
+    elif co2 < 1500:
+        score += 15
+
+    # 온도 점수 (30점 만점) - 20~26도가 쾌적
+    if 20 <= temp <= 26:
+        score += 30
+    elif 18 <= temp <= 28:
+        score += 20
+    else:
+        score += 5
+
+    # 습도 점수 (30점 만점) - 40~60%가 쾌적
+    if 40 <= hum <= 60:
+        score += 30
+    elif 30 <= hum <= 70:
+        score += 20
+    else:
+        score += 5
+
+    # 등급 판정
+    if score >= 80:
+        return score, "Excellent!"
+    elif score >= 60:
+        return score, "Good"
+    elif score >= 40:
+        return score, "Fair"
+    else:
+        return score, "Poor-Ventilate!"
+
+# --- 메인 ---
+print("=== 교실 환경 대시보드 ===")
+
+while True:
+    if co2_s.data_ready():
+        co2, scd_t, scd_h = co2_s.read_measurement()
+        bme_t = float(bme.values[0][:-1])
+        bme_p = float(bme.values[1][:-3])
+
+        # 평균 온습도 (두 센서 교차 검증)
+        avg_temp = (bme_t + scd_t) / 2
+        avg_hum = (float(bme.values[2][:-1]) + scd_h) / 2
+
+        score, grade = judge_environment(co2, avg_temp, avg_hum)
+
+        # OLED 표시
+        oled.fill(0)
+
+        # 상단: 등급 + 점수
+        oled.text(f"{grade}", 0, 0)
+        oled.text(f"{score}pt", 96, 0)
+        oled.hline(0, 10, 128, 1)  # 구분선
+
+        # 중단: 핵심 데이터
+        oled.text(f"CO2:{co2:.0f}ppm", 0, 14)
+        oled.text(f"T:{avg_temp:.1f}C", 0, 26)
+        oled.text(f"H:{avg_hum:.0f}%", 64, 26)
+        oled.text(f"P:{bme_p:.0f}hPa", 0, 38)
+
+        # 하단: CO2 막대
+        oled.hline(0, 50, 128, 1)
+        bar_w = min(int(co2 / 2000 * 120), 120)
+        oled.rect(4, 54, 120, 8, 1)
+        oled.fill_rect(4, 54, bar_w, 8, 1)
+
+        oled.show()
+
+        print(f"[{grade} {score}pt] CO2:{co2:.0f} T:{avg_temp:.1f} H:{avg_hum:.0f}")
+
+    time.sleep(2)
+```
+
+**[시각 자료: OLED 화면]**
+
+```
+┌────────────────────────┐
+│Good              72pt  │
+│________________________│
+│CO2:987ppm              │
+│T:23.4C     H:52%       │
+│P:1013hPa               │
+│________________________│
+│[██████████████░░░░░░░] │
+└────────────────────────┘
+```
+
+<Mermaid client:load chart={`
+graph LR
+    subgraph 환경 상태 판정 플로우
+        READ["센서 데이터 읽기<br/>(2초마다)"] --> CHECK{"data_ready?"}
+        CHECK -->|No| READ
+        CHECK -->|Yes| FUSE["센서 퓨전<br/>평균 온도/습도"]
+        FUSE --> JUDGE["judge_environment( )<br/>점수 계산"]
+        JUDGE --> DISPLAY["OLED 업데이트<br/>등급 + 점수 + 막대"]
+        DISPLAY --> PRINT["시리얼 출력"]
+        PRINT --> READ
+    end
+`} caption="환경 상태 판정 플로우: 2초마다 센서 읽기 → 퓨전 → 판정 → 표시" />
+
+**[예상 Q&A]**
+
+:::note[점수 기준은 누가 정한 거예요?]
+임의로 교실 환경에 맞게 정한 거예요. 실제로는 환경부 실내 공기질 기준, WHO 가이드라인 등을 참고해야 해요. 기준을 바꾸면 결과도 달라지죠. '기준을 누가, 왜 정하는가'도 중요한 질문이에요.
+:::
+
+:::tip[두 센서의 온도 평균을 왜 내요?]
+**센서 퓨전**이라는 기법이에요. 두 센서가 각각 약간씩 오차가 있지만, 평균 내면 오차가 줄어들어요. 자율주행차도 여러 센서의 데이터를 융합해서 판단합니다.
+:::
+
+**[수업 장면]**
+
+선생님이 교실 문과 창문을 모두 닫고 5분 후 OLED를 확인한다.
+선생님: "점수가 72에서 58로 내려갔죠? CO2가 올라갔기 때문이에요."
+(창문을 열자)
+선생님: "5분만 환기하면 다시 올라갈 거예요. 실시간으로 보면 환기 효과가 눈에 보이죠?"
+
+---
+
+### 정리 (40-50분)
+
+```
+오늘의 핵심 개념:
+
+1. I2C 다중 장치: 주소만 다르면 선 2개로 N개 연결
+2. 센서 퓨전: 여러 센서의 데이터를 조합해서 신뢰도 향상
+3. 종합 판정: 여러 수치를 하나의 점수/등급으로 요약
+4. UI 설계: 128x64 제한된 화면에 정보를 효과적으로 배치
+
+이 모든 것이 실제 IoT 제품의 핵심 기술!
+```
+
+:::caution[핵심 정리]
+**I2C 다중 장치**, **센서 퓨전**, **종합 판정 로직**, **제한된 화면의 UI 설계** -- 오늘 배운 네 가지 개념은 실제 IoT 제품 개발의 핵심 기술입니다. 같은 센서 조합이라도 데이터를 어떻게 통합하고 판정하느냐에 따라 완전히 다른 제품이 됩니다.
+:::
+
+---
+
+## 코드 파일 목록
+
+| 파일명 | 설명 | 난이도 |
+|--------|------|--------|
+| `step1_multi_sensor.py` | BME280 + SCD30 동시 읽기 | ★★☆ |
+| `step2_dashboard_ui.py` | OLED 종합 대시보드 + 판정 | ★★★ |
